@@ -18,16 +18,32 @@ final class RingCoordinator {
     private var activeConfig = DefaultConfig.config
     private var pendingConfig: RoundelConfig?
 
-    private var metrics = RingMetrics.make(sectionCount: 1)
-    private var maxOuterRadius = RingMetrics.defaultMaxOuterRadius
+    private let metrics = RingMetrics.standard
+    private var layout = RingLayout.make(root: [], path: [])
+    private var ringCenter = CGPoint.zero
+    private var limits = ScreenLimits.fallback
     private var pollTimer: Timer?
     private var clickMonitors: [Any] = []
+
+    /// Size caps and bounds of the screen the ring opened on.
+    private struct ScreenLimits {
+        var rootMaxOuterRadius: Double
+        var arcMaxOuterRadius: Double
+        var bounds: CGRect
+
+        static let fallback = ScreenLimits(rootMaxOuterRadius: RingMetrics.standard.rootMaxOuterRadius,
+                                           arcMaxOuterRadius: RingMetrics.standard.arcRadiusCap,
+                                           bounds: CGRect(x: 0, y: 0, width: 1440, height: 900))
+    }
 
     init(iconStore: IconStore, registry: ActionRegistry, executor: ActionExecutor) {
         self.iconStore = iconStore
         self.registry = registry
         self.executor = executor
-        self.panel = RingPanel(rootView: RingView(model: model), side: RingMetrics.make(sectionCount: 1).panelSide)
+        self.panel = RingPanel(
+            rootView: RingView(model: model),
+            side: RingMetrics.standard.panelSide(forOuterRadius: RingMetrics.standard.rootMinOuterRadius)
+        )
     }
 
     func start() {
@@ -59,9 +75,14 @@ final class RingCoordinator {
         pendingConfig = nil
         iconStore.reload(for: config)
 
-        for level in RingMetrics.crowdedLevels(in: config) {
-            let where_ = level.path.isEmpty ? "the top ring" : "group '\(level.path.joined(separator: " > "))'"
-            Log.warning("\(where_) has \(level.count) sections, more than fit comfortably on screen. Consider grouping some of them.")
+        for warning in metrics.levelWarnings(in: config) {
+            let place = warning.path.isEmpty ? "the top ring" : "group '\(warning.path.joined(separator: " > "))'"
+            switch warning.kind {
+            case .crowded:
+                Log.warning("\(place) has \(warning.count) items, more than fit comfortably on screen. Consider regrouping some of them.")
+            case .tooDeep:
+                Log.warning("\(place) is nested too deeply to fit on screen (\(warning.path.count) arcs out). Consider flattening the groups.")
+            }
         }
     }
 
@@ -72,6 +93,8 @@ final class RingCoordinator {
     }
 
     private func hotkeyUp() {
+        // Look at where the pointer is right now, not where it was at the last frame.
+        if interaction.isOpen, interaction.mode == .holdRelease { pollPointer() }
         apply(interaction.hotkeyUp())
     }
 
@@ -87,9 +110,9 @@ final class RingCoordinator {
             break
         case .opened:
             open()
-        case .levelChanged:
-            withAnimation(.easeOut(duration: 0.1)) { showCurrentLevel() }
-            // The ring under the cursor is new: tell the state machine where the cursor sits in it.
+        case .layoutChanged:
+            withAnimation(.easeOut(duration: 0.12)) { rebuildLayout() }
+            // The layout under the pointer is new: tell the state machine what is there now.
             pollPointer()
         case .select(let id):
             run(actionWithID: id)
@@ -104,15 +127,21 @@ final class RingCoordinator {
         let frontmostBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
 
         let mouse = NSEvent.mouseLocation
-        maxOuterRadius = Self.maxOuterRadius(at: mouse)
-        showCurrentLevel()
-        panel.show(centeredOn: mouse, side: metrics.panelSide)
+        limits = Self.screenLimits(at: mouse, metrics: metrics)
+
+        // The ring center stays where the pointer was; later resizes keep it fixed (sides are even whole numbers).
+        let rootSide = metrics.panelSide(forOuterRadius: metrics.rootBand(itemCount: interaction.nodes(atLevel: 0).count,
+                                                                         maxOuterRadius: limits.rootMaxOuterRadius).outerRadius)
+        ringCenter = CGPoint(x: (mouse.x - rootSide / 2).rounded() + rootSide / 2, y: (mouse.y - rootSide / 2).rounded() + rootSide / 2)
+
+        rebuildLayout()
+        panel.show(centeredOn: ringCenter, side: model.panelSide)
         pollPointer()
         startTracking()
         KeyboardShortcuts.enable(.dismissRing)
 
         let millis = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
-        Log.info("Ring opened in \(String(format: "%.1f", millis)) ms (\(interaction.mode.rawValue), \(interaction.currentNodes.count) sections)")
+        Log.info("Ring opened in \(String(format: "%.1f", millis)) ms (\(interaction.mode.rawValue), \(interaction.nodes(atLevel: 0).count) sections)")
 
         // Focus check: the frontmost app must be the same one after we show the panel.
         let after = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -125,31 +154,44 @@ final class RingCoordinator {
         stopTracking()
         KeyboardShortcuts.disable(.dismissRing)
         panel.hide()
-        model.highlighted = nil
-        model.dwellProgress = nil
+        model.bands = []
+        model.highlighted = []
         if let pendingConfig { activate(pendingConfig) }
     }
 
-    /// Rebuilds the view model and panel size for the level the state machine is on.
-    private func showCurrentLevel() {
-        let nodes = interaction.currentNodes
-        metrics = RingMetrics.make(sectionCount: nodes.count, maxOuterRadius: maxOuterRadius)
+    /// Recomputes the layout for the open groups and pushes it to the view model and the panel size.
+    private func rebuildLayout() {
+        layout = RingLayout.make(
+            root: interaction.nodes(atLevel: 0),
+            path: interaction.path,
+            metrics: metrics,
+            rootMaxOuterRadius: limits.rootMaxOuterRadius,
+            arcMaxOuterRadius: limits.arcMaxOuterRadius,
+            placement: ArcPlacement.Context(ringCenter: ringCenter, bounds: limits.bounds)
+        )
 
-        model.items = RingItem.items(
-            for: nodes,
-            isAvailable: { [registry] in registry.isAvailable($0) },
-            isActive: { [registry] in registry.isActive($0) },
-            defaultIcon: { [registry] in registry.defaultIcon(for: $0) }
-        ).map {
-            DisplayItem(item: $0, icon: iconStore.resolve($0))
+        model.bands = layout.bands.map { band in
+            let items = RingItem.items(
+                for: interaction.nodes(atLevel: band.level),
+                isAvailable: { [registry] in registry.isAvailable($0) },
+                isActive: { [registry] in registry.isActive($0) },
+                defaultIcon: { [registry] in registry.defaultIcon(for: $0) }
+            ).map { DisplayItem(item: $0, icon: iconStore.resolve($0)) }
+            return BandModel(band: band, items: items, connector: connector(for: band))
         }
-        model.metrics = metrics
-        model.depth = interaction.depth
-        model.highlighted = nil
-        model.dwellProgress = nil
-        model.levelToken += 1
+        model.highlighted = Set(interaction.highlightedItems)
+        model.panelSide = metrics.panelSide(forOuterRadius: layout.outerRadius)
+        if panel.isVisible { panel.resize(side: model.panelSide) }
+    }
 
-        if panel.isVisible { panel.resize(side: metrics.panelSide) }
+    /// The short stub drawn between a parent section and its arc.
+    private func connector(for band: RingBand) -> BandModel.Connector? {
+        guard band.level > 0, layout.bands.indices.contains(band.level - 1), interaction.path.indices.contains(band.level - 1) else { return nil }
+        let parent = layout.bands[band.level - 1]
+        let parentID = interaction.path[band.level - 1]
+        guard let index = interaction.nodes(atLevel: band.level - 1).firstIndex(where: { $0.id == parentID }) else { return nil }
+        return BandModel.Connector(angle: parent.centerAngle(ofItem: index), width: parent.itemWidth,
+                                   innerRadius: parent.outerRadius, outerRadius: band.innerRadius, parentID: parentID)
     }
 
     // MARK: Running actions
@@ -178,12 +220,12 @@ final class RingCoordinator {
 
         let buttons: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: buttons, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.pointerClicked() }
+            MainActor.assumeIsolated { self?.pointerClicked(inThisApp: false) }
         }) {
             clickMonitors.append(global)
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: buttons, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.pointerClicked() }
+            MainActor.assumeIsolated { self?.pointerClicked(inThisApp: true) }
             return event
         }) {
             clickMonitors.append(local)
@@ -200,48 +242,45 @@ final class RingCoordinator {
     private func pollPointer() {
         guard interaction.isOpen else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        let offset = pointerOffset()
-        let section = metrics.geometry.sectionIndex(dx: offset.dx, dy: offset.dy)
 
-        let outcome = interaction.update(section: section, now: now)
-        if outcome != .none {
-            apply(outcome)
-            return
+        // A layout change can put a different item under the pointer, so ask again (a few times at most).
+        for _ in 0..<4 {
+            let offset = pointerOffset()
+            let outcome = interaction.update(hit: layout.hit(dx: offset.dx, dy: offset.dy), now: now)
+            guard outcome == .layoutChanged else { break }
+            withAnimation(.easeOut(duration: 0.12)) { rebuildLayout() }
         }
 
-        if model.highlighted != interaction.highlighted { model.highlighted = interaction.highlighted }
-        let progress = interaction.dwellProgress(at: now)
-        if model.dwellProgress != progress { model.dwellProgress = progress }
+        let highlighted = Set(interaction.highlightedItems)
+        if model.highlighted != highlighted { model.highlighted = highlighted }
     }
 
-    private func pointerClicked() {
-        let offset = pointerOffset()
-        let geometry = metrics.geometry
-        let distance = hypot(offset.dx, offset.dy)
-
-        let target: ClickTarget
-        if distance < metrics.deadZoneRadius {
-            target = .center
-        } else if geometry.isWithinRing(dx: offset.dx, dy: offset.dy), let section = geometry.sectionIndex(dx: offset.dx, dy: offset.dy) {
-            target = .section(section)
+    private func pointerClicked(inThisApp: Bool) {
+        let hit: RingHit
+        if inThisApp {
+            let offset = pointerOffset()
+            hit = layout.hit(dx: offset.dx, dy: offset.dy)
         } else {
-            target = .outside   // beyond the drawn ring, the transparent panel corners, or another app
+            hit = .outside   // a click in another app
         }
-        apply(interaction.click(target))
+        apply(interaction.click(hit))
     }
 
     /// Cursor offset from the ring center, y-up, in screen points.
     private func pointerOffset() -> (dx: Double, dy: Double) {
         let mouse = NSEvent.mouseLocation
-        let center = panel.ringCenter
-        return (Double(mouse.x - center.x), Double(mouse.y - center.y))
+        return (Double(mouse.x - ringCenter.x), Double(mouse.y - ringCenter.y))
     }
 
-    /// Keeps the largest ring inside the screen the cursor is on.
-    private static func maxOuterRadius(at point: CGPoint) -> Double {
+    /// Caps that keep the ring inside the screen the pointer is on, and that screen's usable area.
+    private static func screenLimits(at point: CGPoint, metrics: RingMetrics) -> ScreenLimits {
         let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
-        guard let frame = screen?.visibleFrame else { return RingMetrics.defaultMaxOuterRadius }
-        let fits = (Double(min(frame.width, frame.height)) / 2).rounded(.down) - RingMetrics.panelPadding - 8
-        return min(RingMetrics.defaultMaxOuterRadius, max(RingMetrics.minOuterRadius, fits))
+        guard let frame = screen?.visibleFrame else { return .fallback }
+        let fits = (Double(min(frame.width, frame.height)) / 2).rounded(.down) - metrics.panelPadding - 8
+        return ScreenLimits(
+            rootMaxOuterRadius: min(metrics.rootMaxOuterRadius, max(metrics.rootMinOuterRadius, fits)),
+            arcMaxOuterRadius: min(metrics.arcRadiusCap, max(metrics.rootMinOuterRadius, fits)),
+            bounds: frame
+        )
     }
 }

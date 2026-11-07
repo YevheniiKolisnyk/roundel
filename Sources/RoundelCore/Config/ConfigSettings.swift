@@ -1,40 +1,30 @@
 import Foundation
 
 public struct ConfigSettings: Equatable, Sendable, Codable {
-    public static let dwellRange = 100...1000
-    public static let defaultDwellMs = 250
+    public static let expandDelayRange = 0...1000
+    public static let defaultExpandDelayMs = 120
 
     public var openMode: OpenMode
-    /// Hover time on a group before its child ring opens (hover mode only).
-    public private(set) var dwellMs: Int
-    /// Hover time in the center before going back one level (hover mode only).
-    public private(set) var centerDwellMs: Int
+    /// Hover time on a group before its arc opens, in milliseconds. 0 opens it immediately.
+    /// (`dwellMs` and `centerDwellMs` from older configs are ignored; see `ConfigLoader.notes`.)
+    public private(set) var expandDelayMs: Int
 
-    public init(openMode: OpenMode = .holdRelease,
-                dwellMs: Int = defaultDwellMs,
-                centerDwellMs: Int = defaultDwellMs) {
+    public init(openMode: OpenMode = .holdRelease, expandDelayMs: Int = defaultExpandDelayMs) {
         self.openMode = openMode
-        self.dwellMs = Self.clamp(dwellMs)
-        self.centerDwellMs = Self.clamp(centerDwellMs)
+        self.expandDelayMs = min(max(expandDelayMs, Self.expandDelayRange.lowerBound), Self.expandDelayRange.upperBound)
     }
 
-    public var dwell: TimeInterval { Double(dwellMs) / 1000 }
-    public var centerDwell: TimeInterval { Double(centerDwellMs) / 1000 }
-
-    private static func clamp(_ value: Int) -> Int {
-        min(max(value, dwellRange.lowerBound), dwellRange.upperBound)
-    }
+    public var expandDelay: TimeInterval { Double(expandDelayMs) / 1000 }
 
     private enum CodingKeys: String, CodingKey {
-        case openMode, dwellMs, centerDwellMs
+        case openMode, expandDelayMs
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             openMode: try container.decodeIfPresent(OpenMode.self, forKey: .openMode) ?? .holdRelease,
-            dwellMs: try container.decodeIfPresent(Int.self, forKey: .dwellMs) ?? Self.defaultDwellMs,
-            centerDwellMs: try container.decodeIfPresent(Int.self, forKey: .centerDwellMs) ?? Self.defaultDwellMs
+            expandDelayMs: try container.decodeIfPresent(Int.self, forKey: .expandDelayMs) ?? Self.defaultExpandDelayMs
         )
     }
 }

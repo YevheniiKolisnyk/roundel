@@ -12,8 +12,10 @@ public enum DefaultConfig {
         "",
         "version: always 1.",
         "settings.openMode: \"holdRelease\" (hold the hotkey, point, release) or \"clickRequired\" (tap the hotkey, then click).",
-        "settings.dwellMs: hover time on a group before it opens, 100-1000 ms. Hover mode only.",
-        "settings.centerDwellMs: hover time in the center before going back one level, 100-1000 ms. Hover mode only.",
+        "settings.expandDelayMs: how long to hover a group before its arc opens, 0-1000 ms (default 120).",
+        "Groups open as an arc around the section you point at; keep moving outwards to open deeper groups.",
+        "In hold mode, release on an action to run it; release on a group, in a gap or in the center to cancel.",
+        "In click mode, hovering also opens arcs; click an action to run it, click a group to pin its arc, click the center or outside to close.",
         "",
         "ring: the sections, clockwise from the top. Every node has a unique \"id\", a \"title\", an optional \"icon\" and a \"type\":",
         "  \"action\": runs \"action\" with \"params\".",
@@ -48,8 +50,7 @@ public enum DefaultConfig {
       "version": 1,
       "settings": {
         "openMode": "holdRelease",
-        "dwellMs": 250,
-        "centerDwellMs": 250
+        "expandDelayMs": 120
       },
       "ring": [
         {
@@ -57,7 +58,7 @@ public enum DefaultConfig {
           "id": "launch",
           "title": "Launch",
           "icon": { "symbol": "paperplane.fill" },
-          "_comment": "A group. Hover it for a moment (or click it in click mode) to open its children.",
+          "_comment": "A group. Point at it and its children open as an arc around it.",
           "children": [
             { "type": "action", "id": "launch.safari", "title": "Safari", "icon": { "symbol": "safari" },
               "action": "app.open", "params": { "bundleId": "com.apple.Safari" } },

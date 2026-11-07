@@ -58,6 +58,20 @@ public enum ConfigLoader {
         }
     }
 
+    /// Non-fatal remarks about a file that loaded fine, e.g. settings that no longer do anything. The host logs them.
+    public static func notes(for data: Data) -> [String] {
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let settings = object["settings"] as? [String: Any] else { return [] }
+        var notes: [String] = []
+        if settings["dwellMs"] != nil {
+            notes.append("settings.dwellMs is no longer used; settings.expandDelayMs (default \(ConfigSettings.defaultExpandDelayMs)) replaces it")
+        }
+        if settings["centerDwellMs"] != nil {
+            notes.append("settings.centerDwellMs is no longer used: the center does not go back any more, arcs close when the pointer moves away")
+        }
+        return notes
+    }
+
     public static func encode(_ config: RoundelConfig) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

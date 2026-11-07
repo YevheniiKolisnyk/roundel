@@ -31,8 +31,7 @@ final class ConfigDecodingTests: XCTestCase {
         let config = try decode(wrap(minimalAction))
         XCTAssertEqual(config.version, 1)
         XCTAssertEqual(config.settings.openMode, .holdRelease)
-        XCTAssertEqual(config.settings.dwellMs, 250)
-        XCTAssertEqual(config.settings.centerDwellMs, 250)
+        XCTAssertEqual(config.settings.expandDelayMs, 120)
         XCTAssertEqual(config.ring.count, 1)
         guard case .action(let action) = config.ring[0] else { return XCTFail("expected action") }
         XCTAssertEqual(action.id, "a")
@@ -46,7 +45,7 @@ final class ConfigDecodingTests: XCTestCase {
     func testEncodeDecodeRoundTrip() throws {
         let config = RoundelConfig(
             version: 1,
-            settings: ConfigSettings(openMode: .clickRequired, dwellMs: 300, centerDwellMs: 400),
+            settings: ConfigSettings(openMode: .clickRequired, expandDelayMs: 300),
             ring: [
                 .action(ActionNode(id: "a", title: "A", icon: .symbol("star"), action: "log",
                                    params: .object(["n": .number(1.5), "list": .array([.string("x"), .null, .bool(true)])]))),
@@ -166,27 +165,36 @@ final class ConfigDecodingTests: XCTestCase {
 
     // MARK: Settings
 
-    func testDwellValuesAreClamped() throws {
-        let low = try decode(#"{"version":1,"settings":{"dwellMs":10,"centerDwellMs":-5},"ring":[\#(minimalAction)]}"#)
-        XCTAssertEqual(low.settings.dwellMs, 100)
-        XCTAssertEqual(low.settings.centerDwellMs, 100)
-        let high = try decode(#"{"version":1,"settings":{"dwellMs":5000,"centerDwellMs":1001},"ring":[\#(minimalAction)]}"#)
-        XCTAssertEqual(high.settings.dwellMs, 1000)
-        XCTAssertEqual(high.settings.centerDwellMs, 1000)
-        let ok = try decode(#"{"version":1,"settings":{"dwellMs":400,"centerDwellMs":100},"ring":[\#(minimalAction)]}"#)
-        XCTAssertEqual(ok.settings.dwellMs, 400)
-        XCTAssertEqual(ok.settings.centerDwellMs, 100)
+    func testExpandDelayIsClampedToZeroThroughOneThousand() throws {
+        XCTAssertEqual(try decode(#"{"version":1,"settings":{"expandDelayMs":-5},"ring":[\#(minimalAction)]}"#).settings.expandDelayMs, 0)
+        XCTAssertEqual(try decode(#"{"version":1,"settings":{"expandDelayMs":0},"ring":[\#(minimalAction)]}"#).settings.expandDelayMs, 0, "zero means instantly")
+        XCTAssertEqual(try decode(#"{"version":1,"settings":{"expandDelayMs":400},"ring":[\#(minimalAction)]}"#).settings.expandDelayMs, 400)
+        XCTAssertEqual(try decode(#"{"version":1,"settings":{"expandDelayMs":1000},"ring":[\#(minimalAction)]}"#).settings.expandDelayMs, 1000)
+        XCTAssertEqual(try decode(#"{"version":1,"settings":{"expandDelayMs":5000},"ring":[\#(minimalAction)]}"#).settings.expandDelayMs, 1000)
     }
 
-    func testDwellSecondsAccessors() {
-        let settings = ConfigSettings(dwellMs: 400, centerDwellMs: 150)
-        XCTAssertEqual(settings.dwell, 0.4, accuracy: 1e-9)
-        XCTAssertEqual(settings.centerDwell, 0.15, accuracy: 1e-9)
+    func testExpandDelaySecondsAccessor() {
+        XCTAssertEqual(ConfigSettings(expandDelayMs: 400).expandDelay, 0.4, accuracy: 1e-9)
+        XCTAssertEqual(ConfigSettings(expandDelayMs: 0).expandDelay, 0)
     }
 
     func testSettingsInitClamps() {
-        XCTAssertEqual(ConfigSettings(dwellMs: 1, centerDwellMs: 99999).dwellMs, 100)
-        XCTAssertEqual(ConfigSettings(dwellMs: 1, centerDwellMs: 99999).centerDwellMs, 1000)
+        XCTAssertEqual(ConfigSettings(expandDelayMs: -1).expandDelayMs, 0)
+        XCTAssertEqual(ConfigSettings(expandDelayMs: 99_999).expandDelayMs, 1000)
+    }
+
+    func testOldDwellSettingsStillLoadAndAreIgnored() throws {
+        let config = try decode(#"{"version":1,"settings":{"openMode":"clickRequired","dwellMs":600,"centerDwellMs":900},"ring":[\#(minimalAction)]}"#)
+        XCTAssertEqual(config.settings.openMode, .clickRequired)
+        XCTAssertEqual(config.settings.expandDelayMs, 120, "dwellMs does not leak into expandDelayMs")
+    }
+
+    func testOldDwellSettingsAreNotWrittenBack() throws {
+        let data = try ConfigLoader.encode(RoundelConfig(ring: [.action(ActionNode(id: "a", title: "A", action: "x"))]))
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(text.contains("expandDelayMs"))
+        XCTAssertFalse(text.contains("dwellMs"))
+        XCTAssertFalse(text.contains("centerDwellMs"))
     }
 
     // MARK: Lookup

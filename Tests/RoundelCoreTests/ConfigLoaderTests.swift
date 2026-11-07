@@ -59,6 +59,30 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertTrue(failure.description.contains("nope.json"), failure.description)
     }
 
+    // MARK: Notes about settings that are no longer used
+
+    func testNotesMentionRemovedDwellSettings() {
+        let data = Data(#"{"version":1,"settings":{"dwellMs":300,"centerDwellMs":300},"ring":[]}"#.utf8)
+        let notes = ConfigLoader.notes(for: data)
+        XCTAssertEqual(notes.count, 2)
+        XCTAssertTrue(notes.contains { $0.contains("settings.dwellMs") && $0.contains("expandDelayMs") }, "\(notes)")
+        XCTAssertTrue(notes.contains { $0.contains("settings.centerDwellMs") }, "\(notes)")
+    }
+
+    func testNoNotesForCurrentSettingsOrBrokenInput() {
+        XCTAssertTrue(ConfigLoader.notes(for: Data(#"{"version":1,"settings":{"expandDelayMs":100},"ring":[]}"#.utf8)).isEmpty)
+        XCTAssertTrue(ConfigLoader.notes(for: Data(#"{"version":1,"ring":[]}"#.utf8)).isEmpty)
+        XCTAssertTrue(ConfigLoader.notes(for: Data("{".utf8)).isEmpty)
+        XCTAssertTrue(ConfigLoader.notes(for: Data("[1]".utf8)).isEmpty)
+    }
+
+    func testOldConfigWithRemovedSettingsStillLoadsThroughTheState() throws {
+        var state = ConfigState(initial: DefaultConfig.config)
+        let old = Data(#"{"version":1,"settings":{"dwellMs":250,"centerDwellMs":250},"ring":[{"type":"action","id":"a","title":"A","action":"log"}]}"#.utf8)
+        XCTAssertEqual(state.apply(old), .updated)
+        XCTAssertEqual(state.config.settings.expandDelayMs, 120)
+    }
+
     // MARK: Keep the last good config
 
     func testRejectedConfigKeepsLastGood() throws {

@@ -3,70 +3,92 @@ import Foundation
 /// What the host should do after feeding an event to `RingInteraction`.
 public enum RingOutcome: Equatable, Sendable {
     case none
-    /// Ring just opened; show the panel.
+    /// The ring just opened; show the panel.
     case opened
-    /// The visible level changed (entered a group or went back); redraw and re-feed the pointer position.
-    case levelChanged
-    /// Commit the action node with this id and close.
+    /// Arcs opened or closed; rebuild the layout and the view.
+    case layoutChanged
+    /// Run the action node with this id and close.
     case select(String)
-    /// Close without committing.
+    /// Close without running anything.
     case dismiss
 }
 
-/// What a click landed on, as classified by the host from the pointer position.
-public enum ClickTarget: Equatable, Sendable {
-    case section(Int)
-    /// The dead zone in the middle.
-    case center
-    /// Beyond the drawn ring, or in another app.
-    case outside
+/// An item in the layout: `level` 0 is the root ring, level N is the arc opened by the Nth group of the chain.
+public struct RingItemRef: Hashable, Sendable {
+    public let level: Int
+    public let index: Int
+
+    public init(level: Int, index: Int) {
+        self.level = level
+        self.index = index
+    }
 }
 
-/// Pure state machine for open / hover / dwell / navigate / commit. No AppKit and no timers: the host calls
-/// `update(section:now:)` regularly with a monotonic clock and acts on the returned outcome.
+/// Pure state machine for the expanding-arc ring. The host feeds it what is under the pointer (`RingHit`) and the time;
+/// it decides which groups are open, what is highlighted and what a release or a click means.
+///
+/// Rules (the same hover logic in both modes):
+/// - Hovering a group opens its arc after `expandDelay`. The arc belongs to a *chain* of open groups, one per level.
+/// - While the pointer is on any open group's own section, or anywhere in the deepest arc, the chain does not change
+///   (the "sticky parent").
+/// - Hovering a different group at some level replaces the chain from that level on, after `expandDelay`.
+/// - Hovering a leaf next to an open group, or being in a gap, the center or outside, closes arcs, but only after the
+///   pointer has stayed away continuously for `closeHysteresis`, so a brief slip does not collapse the submenu.
+/// - Click mode only: clicking a group pins its arc (pinned arcs ignore the "moved away" closing); clicking a pinned
+///   group again closes it.
 public struct RingInteraction: Sendable {
     public private(set) var isOpen = false
     /// Locked when the ring opens.
     public private(set) var mode: OpenMode = .holdRelease
-    /// Ids of the groups entered so far, outermost first.
+    /// Ids of the open groups, outermost first. `path.count` arcs are open besides the root ring.
     public private(set) var path: [String] = []
-    public private(set) var currentNodes: [Node] = []
-    public private(set) var highlighted: Int?
+    /// The first `pinnedDepth` groups of the chain are pinned (click mode).
+    public private(set) var pinnedDepth = 0
+    public private(set) var hovered: RingItemRef?
 
-    public var depth: Int { path.count }
+    public var levelCount: Int { path.count + 1 }
 
-    private var root: [Node] = []
-    private var dwellDuration: TimeInterval = 0.25
-    private var centerDwellDuration: TimeInterval = 0.25
-    private var dwell = Dwell.none
-    private var suppression = Suppression.none
+    private let closeHysteresis: TimeInterval
+    private var expandDelay: TimeInterval = 0.12
+    private var levels: [[Node]] = []
+    private var pending = Pending.none
+    /// A group the user just closed by clicking; it must not reopen while the pointer is still on it.
+    private var suppressed: RingItemRef?
 
-    private enum Dwell: Equatable, Sendable {
+    private enum Pending: Equatable, Sendable {
         case none
-        case group(index: Int, since: TimeInterval)
-        case center(since: TimeInterval)
+        case expand(level: Int, id: String, since: TimeInterval)
+        case collapse(toDepth: Int, since: TimeInterval)
+    }
 
-        func withStart(_ now: TimeInterval) -> Dwell {
-            switch self {
-            case .none: .none
-            case .group(let index, _): .group(index: index, since: now)
-            case .center: .center(since: now)
+    /// Tolerance for comparing times, so 0.12 s after 0.1 s counts as 0.12 s despite floating point.
+    private static let epsilon = 1e-9
+
+    public init(metrics: RingMetrics = .standard) {
+        closeHysteresis = metrics.closeHysteresis
+    }
+
+    // MARK: Reading the state
+
+    public func nodes(atLevel level: Int) -> [Node] {
+        levels.indices.contains(level) ? levels[level] : []
+    }
+
+    /// The open chain (one item per open group) plus the hovered item.
+    public var highlightedItems: [RingItemRef] {
+        var result: [RingItemRef] = []
+        for (level, id) in path.enumerated() {
+            if let index = nodes(atLevel: level).firstIndex(where: { $0.id == id }) {
+                result.append(RingItemRef(level: level, index: index))
             }
         }
+        if let hovered, !result.contains(hovered) { result.append(hovered) }
+        return result
     }
 
-    /// Stops a dwell from re-triggering by itself right after the ring changed under a stationary cursor.
-    private enum Suppression: Equatable, Sendable {
-        case none
-        /// A group was just entered; the next pointer sample says which child section is under the cursor.
-        case awaitingFirstSample
-        /// Ignore dwell on this section until the pointer is somewhere else.
-        case section(Int)
-        /// Went back and the pointer is parked in the center; ignore center dwell until it leaves.
-        case center
+    public func isHighlighted(level: Int, index: Int) -> Bool {
+        highlightedItems.contains(RingItemRef(level: level, index: index))
     }
-
-    public init() {}
 
     // MARK: Hotkey
 
@@ -74,25 +96,24 @@ public struct RingInteraction: Sendable {
         if !isOpen {
             isOpen = true
             mode = config.settings.openMode
-            root = config.ring
-            dwellDuration = config.settings.dwell
-            centerDwellDuration = config.settings.centerDwell
+            expandDelay = config.settings.expandDelay
+            levels = [config.ring]
             path = []
-            currentNodes = root
-            highlighted = nil
-            dwell = .none
-            suppression = .none
+            pinnedDepth = 0
+            hovered = nil
+            pending = .none
+            suppressed = nil
             return .opened
         }
-        // Pressing the hotkey again while a click-required ring is open closes it, from any depth.
+        // Pressing the hotkey again while a click-required ring is open closes everything, at any depth.
         if mode == .clickRequired { return close(.dismiss) }
         return .none
     }
 
     public mutating func hotkeyUp() -> RingOutcome {
         guard isOpen, mode == .holdRelease else { return .none }
-        guard let index = highlighted, currentNodes.indices.contains(index) else { return close(.dismiss) }
-        switch currentNodes[index] {
+        guard let hovered, let node = node(at: hovered) else { return close(.dismiss) }
+        switch node {
         case .action(let action): return close(.select(action.id))
         case .group: return close(.dismiss)   // releasing on a group cancels
         }
@@ -105,125 +126,126 @@ public struct RingInteraction: Sendable {
 
     // MARK: Pointer
 
-    /// `section` is the section under the pointer in the current level, or `nil` in the center dead zone.
-    /// Indices outside the current level are ignored.
-    public mutating func update(section: Int?, now: TimeInterval) -> RingOutcome {
+    /// Call regularly (e.g. every frame) with what is under the pointer.
+    public mutating func update(hit: RingHit, now: TimeInterval) -> RingOutcome {
         guard isOpen else { return .none }
-        if let section, !currentNodes.indices.contains(section) { return .none }
 
-        highlighted = section
-        guard mode == .holdRelease else { return .none }   // click mode never dwells
+        var ref: RingItemRef?
+        if case .item(let level, let index) = hit, levels.indices.contains(level), levels[level].indices.contains(index) {
+            ref = RingItemRef(level: level, index: index)
+        }
+        hovered = ref
+        if let suppressed, suppressed != ref { self.suppressed = nil }
 
-        resolveSuppression(for: section)
+        // Center, gap, outside, or a hit that points at nothing: away from the chain.
+        guard let ref, let node = node(at: ref) else { return scheduleCollapse(toDepth: 0, now: now) }
 
-        let target = dwellTarget(for: section)
-        switch (dwell, target) {
-        case (.group(let a, _), .group(let b, _)) where a == b:
-            break
-        case (.center, .center):
-            break
-        default:
-            dwell = target.withStart(now)
+        if ref.level < path.count {
+            if node.id == path[ref.level] {
+                pending = .none   // on an open group's own section: everything stays
+                return .none
+            }
+            // A sibling of an open group.
+            return node.isGroup ? scheduleExpand(ref, node, now: now) : scheduleCollapse(toDepth: ref.level, now: now)
         }
 
-        switch dwell {
-        case .group(let index, let since) where now - since >= dwellDuration:
-            return enterGroup(at: index)
-        case .center(let since) where now - since >= centerDwellDuration:
-            return goBack()
-        default:
-            return .none
-        }
-    }
-
-    /// 0...1 progress of the running dwell, for drawing feedback. `nil` when nothing is dwelling.
-    public func dwellProgress(at now: TimeInterval) -> Double? {
-        switch dwell {
-        case .none: nil
-        case .group(_, let since): min(1, max(0, (now - since) / dwellDuration))
-        case .center(let since): min(1, max(0, (now - since) / centerDwellDuration))
-        }
+        // In the deepest arc: a group opens its arc, a leaf just holds the chain.
+        if node.isGroup { return scheduleExpand(ref, node, now: now) }
+        pending = .none
+        return .none
     }
 
     // MARK: Click
 
-    public mutating func click(_ target: ClickTarget) -> RingOutcome {
+    /// `hit` is what the click landed on, classified by the host (clicks in other apps are `.outside`).
+    public mutating func click(_ hit: RingHit) -> RingOutcome {
         guard isOpen, mode == .clickRequired else { return .none }
-        switch target {
-        case .outside:
+        switch hit {
+        case .center, .outside:
             return close(.dismiss)
-        case .center:
-            return depth > 0 ? goBack() : close(.dismiss)
-        case .section(let index):
-            guard currentNodes.indices.contains(index) else { return .none }
-            switch currentNodes[index] {
-            case .action(let action): return close(.select(action.id))
-            case .group: return enterGroup(at: index)
+        case .gap:
+            return .none
+        case .item(let level, let index):
+            let ref = RingItemRef(level: level, index: index)
+            guard let node = node(at: ref) else { return .none }
+            switch node {
+            case .action(let action):
+                return close(.select(action.id))
+            case .group:
+                if level < path.count, path[level] == node.id {
+                    if pinnedDepth > level {
+                        // Pinned: a second click closes its arc, and hovering must not instantly reopen it.
+                        suppressed = ref
+                        return truncate(toDepth: level)
+                    }
+                    pinnedDepth = level + 1   // opened by hover: pin it
+                    return .none
+                }
+                let outcome = open(group: node, atLevel: level)
+                pinnedDepth = level + 1
+                return outcome
             }
         }
     }
 
     // MARK: Private
 
-    private func dwellTarget(for section: Int?) -> Dwell {
-        guard let section else {
-            guard depth > 0, suppression != .center else { return .none }
-            return .center(since: 0)
+    private func node(at ref: RingItemRef) -> Node? {
+        guard levels.indices.contains(ref.level), levels[ref.level].indices.contains(ref.index) else { return nil }
+        return levels[ref.level][ref.index]
+    }
+
+    private mutating func scheduleExpand(_ ref: RingItemRef, _ node: Node, now: TimeInterval) -> RingOutcome {
+        if suppressed == ref {
+            pending = .none
+            return .none
         }
-        guard currentNodes[section].isGroup, suppression != .section(section) else { return .none }
-        return .group(index: section, since: 0)
-    }
-
-    private mutating func resolveSuppression(for section: Int?) {
-        switch suppression {
-        case .none:
-            break
-        case .awaitingFirstSample:
-            suppression = section.map(Suppression.section) ?? .center
-        case .section(let suppressed):
-            if section != suppressed { suppression = .none }
-        case .center:
-            if section != nil { suppression = .none }
+        if case .expand(let level, let id, let since) = pending, level == ref.level, id == node.id {
+            return now - since >= expandDelay - Self.epsilon ? open(group: node, atLevel: ref.level) : .none
         }
+        pending = .expand(level: ref.level, id: node.id, since: now)
+        return expandDelay <= Self.epsilon ? open(group: node, atLevel: ref.level) : .none
     }
 
-    private mutating func enterGroup(at index: Int) -> RingOutcome {
-        guard currentNodes.indices.contains(index), let children = currentNodes[index].children else { return .none }
-        path.append(currentNodes[index].id)
-        currentNodes = children
-        highlighted = nil
-        dwell = .none
-        suppression = .awaitingFirstSample
-        return .levelChanged
-    }
-
-    private mutating func goBack() -> RingOutcome {
-        guard depth > 0 else { return .none }
-        path.removeLast()
-        currentNodes = nodes(at: path)
-        highlighted = nil
-        dwell = .none
-        suppression = .center
-        return .levelChanged
-    }
-
-    private func nodes(at path: [String]) -> [Node] {
-        var level = root
-        for id in path {
-            guard let children = level.first(where: { $0.id == id })?.children else { return root }
-            level = children
+    /// Closes arcs deeper than `depth` (but never below the pinned ones) once the pointer has been away long enough.
+    private mutating func scheduleCollapse(toDepth depth: Int, now: TimeInterval) -> RingOutcome {
+        let target = max(depth, pinnedDepth)
+        guard path.count > target else {
+            pending = .none
+            return .none
         }
-        return level
+        if case .collapse(let to, let since) = pending, to == target {
+            return now - since >= closeHysteresis - Self.epsilon ? truncate(toDepth: target) : .none
+        }
+        pending = .collapse(toDepth: target, since: now)
+        return .none
+    }
+
+    /// Makes `node` the open group at `level`, replacing whatever was open from that level on.
+    private mutating func open(group node: Node, atLevel level: Int) -> RingOutcome {
+        path = Array(path.prefix(level)) + [node.id]
+        levels = Array(levels.prefix(level + 1)) + [node.children ?? []]
+        pinnedDepth = min(pinnedDepth, level)
+        pending = .none
+        return .layoutChanged
+    }
+
+    private mutating func truncate(toDepth depth: Int) -> RingOutcome {
+        path = Array(path.prefix(depth))
+        levels = Array(levels.prefix(depth + 1))
+        pinnedDepth = min(pinnedDepth, depth)
+        pending = .none
+        return .layoutChanged
     }
 
     private mutating func close(_ outcome: RingOutcome) -> RingOutcome {
         isOpen = false
         path = []
-        currentNodes = []
-        root = []
-        highlighted = nil
-        dwell = .none
-        suppression = .none
+        pinnedDepth = 0
+        levels = []
+        hovered = nil
+        pending = .none
+        suppressed = nil
         return outcome
     }
 }

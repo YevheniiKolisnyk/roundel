@@ -14,6 +14,7 @@ final class ConfigStore {
     private let toast: ToastPresenter
     private var state = ConfigState(initial: DefaultConfig.config)
     private var watcher: ConfigWatcher?
+    private var loggedNotes: Set<String> = []
 
     var config: RoundelConfig { state.config }
     var lastFailure: ConfigLoadFailure? { state.lastFailure }
@@ -64,7 +65,9 @@ final class ConfigStore {
             return false
         }
 
-        switch state.apply(data) {
+        let change = state.apply(data)
+        if case .rejected = change {} else { logNotes(ConfigLoader.notes(for: data)) }
+        switch change {
         case .updated:
             Log.info("Config loaded: \(describe(state.config))")
             onChange?(state.config)
@@ -86,6 +89,14 @@ final class ConfigStore {
             toast.show("Config error: \(failure.summary)\nKeeping the previous config.", isError: true)
         }
         return false
+    }
+
+    /// Remarks about a file that loaded fine (e.g. settings that no longer do anything), logged once until they change.
+    private func logNotes(_ notes: [String]) {
+        for note in notes where !loggedNotes.contains(note) {
+            Log.info("config note: \(note)")
+        }
+        loggedNotes = Set(notes)
     }
 
     private func describe(_ config: RoundelConfig) -> String {
