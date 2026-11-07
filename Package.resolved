@@ -1,5 +1,5 @@
 {
-  "originHash" : "36f6520a6c3feeae3e0fc11916309441f60a9f61c45d478f047ababe9f6ae459",
+  "originHash" : "dedffb547d25d096a998ea8c6cd4699bfb469851d48e23c42e44fc664dad7688",
   "pins" : [
     {
       "identity" : "keyboardshortcuts",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "772133d9dbe800fdac0473226822994c5c162c58",
         "version" : "3.1.0"
+      }
+    },
+    {
+      "identity" : "libwebp-xcode",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SDWebImage/libwebp-Xcode",
+      "state" : {
+        "revision" : "2b5256c29ff4e20f2a0d5ee863b62b1a22144434",
+        "version" : "1.6.0"
       }
     }
   ],

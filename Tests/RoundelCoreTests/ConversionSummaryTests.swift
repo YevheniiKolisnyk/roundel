@@ -5,8 +5,8 @@ final class ConversionSummaryTests: XCTestCase {
     private let jpeg = ImageFormats.format(forKey: "jpeg")!
     private func url(_ name: String) -> URL { URL(fileURLWithPath: "/tmp/\(name)") }
 
-    private func converted(_ name: String, note: ConversionNote? = nil) -> ConversionItemResult {
-        .converted(source: url(name + ".png"), output: url(name + ".jpg"), note: note)
+    private func converted(_ name: String, notes: [ConversionNote] = []) -> ConversionItemResult {
+        .converted(source: url(name + ".png"), output: url(name + ".jpg"), notes: notes)
     }
 
     private func summary(_ results: [ConversionItemResult]) -> ConversionSummary { ConversionSummary(results: results, format: jpeg) }
@@ -75,14 +75,49 @@ final class ConversionSummaryTests: XCTestCase {
     }
 
     func testAnimatedInputIsSaidToBeFirstFrameOnly() {
-        let s = summary([converted("photo", note: .firstFrameOnly)])
+        let s = summary([converted("photo", notes: [.firstFrameOnly])])
         XCTAssertEqual(s.message, "Converted photo.png → photo.jpg · photo.png is animated: only the first frame was converted")
         XCTAssertFalse(s.isWarning)
     }
 
     func testSeveralAnimatedFilesAreSummarized() {
-        let s = summary([converted("a", note: .firstFrameOnly), converted("b", note: .firstFrameOnly), converted("c", note: .firstFrameOnly), converted("d")])
+        let s = summary([converted("a", notes: [.firstFrameOnly]), converted("b", notes: [.firstFrameOnly]), converted("c", notes: [.firstFrameOnly]), converted("d")])
         XCTAssertEqual(s.message, "Converted 4 files to JPEG · 3 animated files: only the first frame was converted")
+    }
+
+    // MARK: Metadata a format could not keep
+
+    private var webp: ImageFormat { ImageFormats.format(forKey: "webp")! }
+
+    func testOneFileThatLostMetadataSaysWhichAndWhere() {
+        let s = ConversionSummary(results: [converted("photo", notes: [.metadataNotKept(["IPTC", "resolution"])])], format: webp)
+        XCTAssertEqual(s.message, "Converted photo.png → photo.jpg · photo.png: IPTC and resolution not kept in WebP")
+        XCTAssertFalse(s.isWarning, "losing metadata is information, not a failure")
+    }
+
+    func testASingleLossIsNamedPlainly() {
+        let s = ConversionSummary(results: [converted("photo", notes: [.metadataNotKept(["IPTC"])])], format: webp)
+        XCTAssertTrue(s.message.hasSuffix("photo.png: IPTC not kept in WebP"), s.message)
+    }
+
+    func testThreeLossesUseACommaAndAnd() {
+        let s = ConversionSummary(results: [converted("photo", notes: [.metadataNotKept(["IPTC", "resolution", "16-bit color"])])], format: webp)
+        XCTAssertTrue(s.message.hasSuffix("photo.png: IPTC, resolution and 16-bit color not kept in WebP"), s.message)
+    }
+
+    func testSeveralFilesShareOneLineWithTheUnionOfWhatWasLost() {
+        let s = ConversionSummary(results: [converted("a", notes: [.metadataNotKept(["IPTC"])]), converted("b", notes: [.metadataNotKept(["resolution", "IPTC"])]), converted("c")], format: webp)
+        XCTAssertEqual(s.message, "Converted 3 files to WebP · 2 files: IPTC, resolution not kept in WebP")
+    }
+
+    func testBothNotesAppearTogether() {
+        let s = ConversionSummary(results: [converted("photo", notes: [.firstFrameOnly, .metadataNotKept(["IPTC"])])], format: webp)
+        XCTAssertEqual(s.message, "Converted photo.png → photo.jpg · photo.png is animated: only the first frame was converted · photo.png: IPTC not kept in WebP")
+    }
+
+    func testAnEmptyLossListSaysNothing() {
+        let s = ConversionSummary(results: [converted("photo", notes: [.metadataNotKept([])])], format: webp)
+        XCTAssertEqual(s.message, "Converted photo.png → photo.jpg")
     }
 
     func testProgressText() {

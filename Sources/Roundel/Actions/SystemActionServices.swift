@@ -1,4 +1,5 @@
 import RoundelCore
+import RoundelWebP
 
 /// Sends executor messages to the log and the toast.
 @MainActor
@@ -20,7 +21,9 @@ extension ActionServices {
     /// The real implementations of every OS-facing protocol.
     @MainActor
     static func system() -> ActionServices {
-        ActionServices(
+        // ImageIO first: it keeps every format it can write; libwebp only adds WebP.
+        let imageBackends = ImageBackends([ImageIOEncoder(), WebPEncoder()])
+        return ActionServices(
             workspace: SystemWorkspace(),
             process: SystemProcessRunner(),
             power: IOKitPowerAssertion(),
@@ -33,8 +36,8 @@ extension ActionServices {
                 secureInput: SystemSecureInput(), clock: SystemAsyncClock()
             ),
             inputSources: SystemInputSources(),
-            imageConverter: ImageConverter(encoder: ImageIOEncoder()),
-            imageCapabilities: SystemImageCapabilities(),
+            imageConverter: ImageConverter(encoder: imageBackends),
+            imageCapabilities: imageBackends,
             logger: SystemActionLogger()
         )
     }

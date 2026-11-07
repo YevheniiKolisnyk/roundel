@@ -14,19 +14,24 @@ public struct ImageFormat: Equatable, Hashable, Sendable {
     public let supportsAlpha: Bool
     /// Can store the EXIF orientation tag. Formats that cannot get the rotation applied to the pixels instead.
     public let storesOrientation: Bool
+    /// Has a lossless mode that can be switched on (`lossless: true`).
+    public let hasLosslessMode: Bool
 }
 
 public enum ImageFormats {
     /// The formats offered in the ring, in ring order. Only those the running system reports as writable are shown
     /// (`CGImageDestinationCopyTypeIdentifiers()`); other writable types (PDF, ICO, TGA, ...) are not conversion targets.
     public static let catalog: [ImageFormat] = [
-        ImageFormat(key: "png", displayName: "PNG", typeIdentifier: "public.png", fileExtension: "png", isLossy: false, supportsAlpha: true, storesOrientation: true),
-        ImageFormat(key: "jpeg", displayName: "JPEG", typeIdentifier: "public.jpeg", fileExtension: "jpg", isLossy: true, supportsAlpha: false, storesOrientation: true),
-        ImageFormat(key: "heic", displayName: "HEIC", typeIdentifier: "public.heic", fileExtension: "heic", isLossy: true, supportsAlpha: true, storesOrientation: true),
-        ImageFormat(key: "tiff", displayName: "TIFF", typeIdentifier: "public.tiff", fileExtension: "tiff", isLossy: false, supportsAlpha: true, storesOrientation: true),
-        ImageFormat(key: "gif", displayName: "GIF", typeIdentifier: "com.compuserve.gif", fileExtension: "gif", isLossy: false, supportsAlpha: true, storesOrientation: false),
-        ImageFormat(key: "bmp", displayName: "BMP", typeIdentifier: "com.microsoft.bmp", fileExtension: "bmp", isLossy: false, supportsAlpha: true, storesOrientation: false),
-        ImageFormat(key: "avif", displayName: "AVIF", typeIdentifier: "public.avif", fileExtension: "avif", isLossy: true, supportsAlpha: true, storesOrientation: true),
+        ImageFormat(key: "png", displayName: "PNG", typeIdentifier: "public.png", fileExtension: "png", isLossy: false, supportsAlpha: true, storesOrientation: true, hasLosslessMode: false),
+        ImageFormat(key: "jpeg", displayName: "JPEG", typeIdentifier: "public.jpeg", fileExtension: "jpg", isLossy: true, supportsAlpha: false, storesOrientation: true, hasLosslessMode: false),
+        ImageFormat(key: "heic", displayName: "HEIC", typeIdentifier: "public.heic", fileExtension: "heic", isLossy: true, supportsAlpha: true, storesOrientation: true, hasLosslessMode: false),
+        ImageFormat(key: "tiff", displayName: "TIFF", typeIdentifier: "public.tiff", fileExtension: "tiff", isLossy: false, supportsAlpha: true, storesOrientation: true, hasLosslessMode: false),
+        ImageFormat(key: "gif", displayName: "GIF", typeIdentifier: "com.compuserve.gif", fileExtension: "gif", isLossy: false, supportsAlpha: true, storesOrientation: false, hasLosslessMode: false),
+        ImageFormat(key: "bmp", displayName: "BMP", typeIdentifier: "com.microsoft.bmp", fileExtension: "bmp", isLossy: false, supportsAlpha: true, storesOrientation: false, hasLosslessMode: false),
+        ImageFormat(key: "avif", displayName: "AVIF", typeIdentifier: "public.avif", fileExtension: "avif", isLossy: true, supportsAlpha: true, storesOrientation: true, hasLosslessMode: false),
+        // ImageIO cannot write WebP; the libwebp backend does. Browsers disagree about the EXIF orientation of WebP,
+        // so the rotation is applied to the pixels.
+        ImageFormat(key: "webp", displayName: "WebP", typeIdentifier: "org.webmproject.webp", fileExtension: "webp", isLossy: true, supportsAlpha: true, storesOrientation: false, hasLosslessMode: true),
     ]
 
     public static func format(forKey key: String) -> ImageFormat? {

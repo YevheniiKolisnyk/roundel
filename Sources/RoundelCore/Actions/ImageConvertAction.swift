@@ -7,7 +7,7 @@ public struct ImageConvertAction: Action {
     public let defaultIcon: Icon = .symbol("photo.on.rectangle.angled")
     public var acceptedInputs: Set<ActionInput> { [.files] }
     public var paramRules: ParamRules {
-        ParamRules(specs: [.string("format", required: true, allowed: ImageFormats.catalog.map(\.key)), .number("quality", range: 0...1)])
+        ParamRules(specs: [.string("format", required: true, allowed: ImageFormats.catalog.map(\.key)), .number("quality", range: 0...1), .bool("lossless")])
     }
 
     private let converter: any ImageConverting
@@ -23,10 +23,14 @@ public struct ImageConvertAction: Action {
         if !capabilities.writableTypeIdentifiers.contains(format.typeIdentifier) {
             return [ParamIssue(message: "this Mac cannot write \(format.displayName)", blocksRun: true)]
         }
+        var notes: [ParamIssue] = []
         if params.double("quality") != nil, !format.isLossy {
-            return [ParamIssue(message: "\"quality\" is ignored for \(format.displayName)", blocksRun: false)]
+            notes.append(ParamIssue(message: "\"quality\" is ignored for \(format.displayName)", blocksRun: false))
         }
-        return []
+        if params.bool("lossless") == true, !format.hasLosslessMode {
+            notes.append(ParamIssue(message: "\"lossless\" is ignored for \(format.displayName)", blocksRun: false))
+        }
+        return notes
     }
 
     /// Half a minute of headroom, plus half a minute per file (big HEIC or TIFF files take a while), at most an hour.
@@ -40,10 +44,13 @@ public struct ImageConvertAction: Action {
             throw ActionError.failed("format must be one of: \(ImageFormats.catalog.map(\.key).joined(separator: ", "))")
         }
 
-        let quality = format.isLossy ? context.params.double("quality") : nil
+        let options = ImageEncodingOptions(
+            quality: format.isLossy ? context.params.double("quality") : nil,
+            lossless: format.hasLosslessMode && context.params.bool("lossless") == true
+        )
         let report = context.reportProgress
         let showsProgress = context.files.count > 1
-        let results = await converter.convert(files: context.files, to: format, quality: quality) { done, total in
+        let results = await converter.convert(files: context.files, to: format, options: options) { done, total in
             if showsProgress { report(ConversionSummary.progressMessage(done: done, total: total)) }
         }
 

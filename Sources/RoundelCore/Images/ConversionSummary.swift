@@ -4,6 +4,8 @@ import Foundation
 public enum ConversionNote: Equatable, Sendable {
     /// The source was animated; only its first frame was converted.
     case firstFrameOnly
+    /// Metadata the target format has no room for, e.g. ["IPTC", "resolution"]. An empty list says nothing.
+    case metadataNotKept([String])
 }
 
 public enum SkipReason: Equatable, Sendable {
@@ -11,7 +13,7 @@ public enum SkipReason: Equatable, Sendable {
 }
 
 public enum ConversionItemResult: Equatable, Sendable {
-    case converted(source: URL, output: URL, note: ConversionNote?)
+    case converted(source: URL, output: URL, notes: [ConversionNote])
     case skipped(source: URL, reason: SkipReason)
     case failed(source: URL, message: String)
 }
@@ -54,6 +56,7 @@ public struct ConversionSummary: Equatable, Sendable {
         if skippedCount > 0 { parts.append("\(skippedCount) skipped (already \(format.displayName))") }
         if failedCount > 0 { parts.append("\(failedCount) failed: \(failureList)") }
         if let note = animatedNote { parts.append(note) }
+        if let note = metadataNote { parts.append(note) }
         return parts.joined(separator: " · ")
     }
 
@@ -78,13 +81,43 @@ public struct ConversionSummary: Equatable, Sendable {
 
     private var animatedNote: String? {
         let animated = results.compactMap { result -> String? in
-            if case .converted(let source, _, .firstFrameOnly?) = result { return source.lastPathComponent }
+            if case .converted(let source, _, let notes) = result, notes.contains(.firstFrameOnly) { return source.lastPathComponent }
             return nil
         }
         switch animated.count {
         case 0: return nil
         case 1: return "\(animated[0]) is animated: only the first frame was converted"
         default: return "\(animated.count) animated files: only the first frame was converted"
+        }
+    }
+
+    /// Metadata the target format could not keep: named for one file, summed up for several.
+    private var metadataNote: String? {
+        var losses: [(name: String, items: [String])] = []
+        for result in results {
+            guard case .converted(let source, _, let notes) = result else { continue }
+            for note in notes {
+                if case .metadataNotKept(let items) = note, !items.isEmpty { losses.append((source.lastPathComponent, items)) }
+            }
+        }
+        switch losses.count {
+        case 0:
+            return nil
+        case 1:
+            return "\(losses[0].name): \(Self.naturalList(losses[0].items)) not kept in \(format.displayName)"
+        default:
+            var union: [String] = []
+            for item in losses.flatMap(\.items) where !union.contains(item) { union.append(item) }
+            return "\(losses.count) files: \(union.joined(separator: ", ")) not kept in \(format.displayName)"
+        }
+    }
+
+    /// "IPTC", "IPTC and resolution", "IPTC, resolution and 16-bit color".
+    private static func naturalList(_ items: [String]) -> String {
+        switch items.count {
+        case 0, 1: items.first ?? ""
+        case 2: "\(items[0]) and \(items[1])"
+        default: items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
         }
     }
 }

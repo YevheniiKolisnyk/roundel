@@ -89,7 +89,7 @@ final class FileActionsTests: XCTestCase {
     func testFormatIsRequiredAndMustBeInTheCatalog() {
         let rules = convertAction().paramRules
         XCTAssertTrue(rules.validate(.object([:]), actionID: "image.convert").contains { $0.blocksRun })
-        XCTAssertTrue(rules.validate(.object(["format": .string("webp")]), actionID: "image.convert").contains { $0.blocksRun })
+        XCTAssertTrue(rules.validate(.object(["format": .string("jxl")]), actionID: "image.convert").contains { $0.blocksRun })
         XCTAssertTrue(rules.validate(.object(["format": .string("jpeg"), "quality": .number(0.8)]), actionID: "image.convert").isEmpty)
         XCTAssertTrue(rules.validate(.object(["format": .string("jpeg"), "quality": .number(2)]), actionID: "image.convert").contains { $0.blocksRun })
     }
@@ -108,28 +108,28 @@ final class FileActionsTests: XCTestCase {
     }
 
     func testRunPassesTheFilesFormatAndQualityToTheConverter() async throws {
-        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), note: nil)]
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), notes: [])]
         _ = try await convertAction().run(context(["format": .string("jpeg"), "quality": .number(0.7)], files: [a]))
         let call = try XCTUnwrap(fakes.imageConverter.calls.first)
         XCTAssertEqual(call.files, [a])
         XCTAssertEqual(call.format.key, "jpeg")
-        XCTAssertEqual(call.quality, 0.7)
+        XCTAssertEqual(call.options.quality, 0.7)
     }
 
     func testQualityIsNotPassedForLosslessFormats() async throws {
-        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.png"), note: nil)]
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.png"), notes: [])]
         _ = try await convertAction().run(context(["format": .string("png"), "quality": .number(0.7)], files: [a]))
-        XCTAssertNil(fakes.imageConverter.calls.first?.quality)
+        XCTAssertNil(fakes.imageConverter.calls.first?.options.quality)
     }
 
     func testSuccessIsAPlainMessage() async throws {
-        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), note: nil)]
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), notes: [])]
         let result = try await convertAction().run(context(["format": .string("jpeg")], files: [a]))
         XCTAssertEqual(result, .message("Converted a.png → a.jpg"))
     }
 
     func testPartialFailureIsAWarning() async throws {
-        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), note: nil), .failed(source: b, message: "not an image")]
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), notes: []), .failed(source: b, message: "not an image")]
         let result = try await convertAction().run(context(["format": .string("jpeg")], files: [a, b]))
         XCTAssertEqual(result, .warning("Converted 1 of 2 files to JPEG · 1 failed: b.png (not an image)"))
     }
@@ -150,7 +150,7 @@ final class FileActionsTests: XCTestCase {
 
     func testSingleFilesDoNotShowProgress() async throws {
         fakes.imageConverter.progressSteps = [(1, 1)]
-        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), note: nil)]
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), notes: [])]
         let log = TextLog()
         _ = try await convertAction().run(context(["format": .string("jpeg")], files: [a], progress: { log.add($0) }))
         XCTAssertTrue(log.lines.isEmpty)
@@ -159,6 +159,46 @@ final class FileActionsTests: XCTestCase {
     func testRunWithoutFilesFails() async {
         let message = await failureMessage { try await convertAction().run(context(["format": .string("jpeg")])) }
         XCTAssertEqual(message, "no files to convert")
+    }
+
+    // MARK: lossless (WebP)
+
+    func testLosslessMustBeABoolean() {
+        let rules = convertAction().paramRules
+        XCTAssertTrue(rules.validate(.object(["format": .string("webp"), "lossless": .bool(true)]), actionID: "image.convert").isEmpty)
+        XCTAssertTrue(rules.validate(.object(["format": .string("webp"), "lossless": .string("yes")]), actionID: "image.convert").contains { $0.blocksRun })
+    }
+
+    func testLosslessOnAFormatWithoutALosslessModeIsOnlyANote() {
+        let issues = convertAction().extraValidation(Params(.object(["format": .string("jpeg"), "lossless": .bool(true)])))
+        XCTAssertEqual(issues.count, 1)
+        XCTAssertFalse(issues[0].blocksRun)
+        XCTAssertTrue(issues[0].message.contains("lossless"), issues[0].message)
+        XCTAssertTrue(convertAction().extraValidation(Params(.object(["format": .string("webp"), "lossless": .bool(true)]))).isEmpty)
+        XCTAssertTrue(convertAction().extraValidation(Params(.object(["format": .string("jpeg"), "lossless": .bool(false)]))).isEmpty, "false is the default, nothing to ignore")
+    }
+
+    func testWebpIsRefusedWhenNoBackendReportsIt() {
+        let action = convertAction(writable: ["public.png"])
+        XCTAssertTrue(action.extraValidation(Params(.object(["format": .string("webp")]))).contains { $0.blocksRun && $0.message.contains("WebP") })
+    }
+
+    func testRunPassesLosslessAndQualityForWebp() async throws {
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.webp"), notes: [])]
+        _ = try await convertAction().run(context(["format": .string("webp"), "lossless": .bool(true), "quality": .number(0.6)], files: [a]))
+        XCTAssertEqual(fakes.imageConverter.calls.first?.options, ImageEncodingOptions(quality: 0.6, lossless: true))
+    }
+
+    func testWebpIsLossyUnlessAskedOtherwise() async throws {
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.webp"), notes: [])]
+        _ = try await convertAction().run(context(["format": .string("webp")], files: [a]))
+        XCTAssertEqual(fakes.imageConverter.calls.first?.options, ImageEncodingOptions(quality: nil, lossless: false))
+    }
+
+    func testLosslessIsNotPassedToFormatsWithoutALosslessMode() async throws {
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), notes: [])]
+        _ = try await convertAction().run(context(["format": .string("jpeg"), "lossless": .bool(true), "quality": .number(0.5)], files: [a]))
+        XCTAssertEqual(fakes.imageConverter.calls.first?.options, ImageEncodingOptions(quality: 0.5, lossless: false))
     }
 
     func testTheTimeoutGrowsWithTheNumberOfFiles() {
@@ -219,20 +259,20 @@ final class FileActionsTests: XCTestCase {
 struct FakeImageCapabilities: ImageCapabilities {
     var writableTypeIdentifiers: [String]
     init(writable: [String]? = nil) {
-        writableTypeIdentifiers = writable ?? ["public.png", "public.jpeg", "public.heic", "public.tiff", "com.compuserve.gif", "com.microsoft.bmp", "public.avif"]
+        writableTypeIdentifiers = writable ?? ["public.png", "public.jpeg", "public.heic", "public.tiff", "com.compuserve.gif", "com.microsoft.bmp", "public.avif", "org.webmproject.webp"]
     }
 }
 
 final class FakeImageConverter: ImageConverting, @unchecked Sendable {
-    struct Call { let files: [URL]; let format: ImageFormat; let quality: Double? }
+    struct Call { let files: [URL]; let format: ImageFormat; let options: ImageEncodingOptions }
     private let lock = NSLock()
     private var _calls: [Call] = []
     var results: [ConversionItemResult] = []
     var progressSteps: [(Int, Int)] = []
     var calls: [Call] { lock.withLock { _calls } }
 
-    func convert(files: [URL], to format: ImageFormat, quality: Double?, progress: @escaping @Sendable (Int, Int) -> Void) async -> [ConversionItemResult] {
-        lock.withLock { _calls.append(Call(files: files, format: format, quality: quality)) }
+    func convert(files: [URL], to format: ImageFormat, options: ImageEncodingOptions, progress: @escaping @Sendable (Int, Int) -> Void) async -> [ConversionItemResult] {
+        lock.withLock { _calls.append(Call(files: files, format: format, options: options)) }
         for (done, total) in progressSteps { progress(done, total) }
         return results
     }

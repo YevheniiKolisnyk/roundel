@@ -3,30 +3,49 @@ import XCTest
 
 final class ImageFormatTests: XCTestCase {
     private let everything = ["public.png", "public.jpeg", "public.heic", "public.tiff", "com.compuserve.gif", "com.microsoft.bmp",
-                              "public.avif", "com.adobe.pdf", "com.microsoft.ico", "public.jpeg-2000"]
+                              "public.avif", "org.webmproject.webp", "com.adobe.pdf", "com.microsoft.ico", "public.jpeg-2000"]
 
     func testTheCatalogIsInTheAgreedOrder() {
-        XCTAssertEqual(ImageFormats.catalog.map(\.key), ["png", "jpeg", "heic", "tiff", "gif", "bmp", "avif"])
-        XCTAssertEqual(ImageFormats.catalog.map(\.displayName), ["PNG", "JPEG", "HEIC", "TIFF", "GIF", "BMP", "AVIF"])
+        XCTAssertEqual(ImageFormats.catalog.map(\.key), ["png", "jpeg", "heic", "tiff", "gif", "bmp", "avif", "webp"])
+        XCTAssertEqual(ImageFormats.catalog.map(\.displayName), ["PNG", "JPEG", "HEIC", "TIFF", "GIF", "BMP", "AVIF", "WebP"])
     }
 
-    func testOnlyJpegHeicAndAvifAreLossy() {
-        XCTAssertEqual(ImageFormats.catalog.filter(\.isLossy).map(\.key), ["jpeg", "heic", "avif"])
+    func testOnlyJpegHeicAvifAndWebpAreLossy() {
+        XCTAssertEqual(ImageFormats.catalog.filter(\.isLossy).map(\.key), ["jpeg", "heic", "avif", "webp"])
     }
 
     func testOnlyJpegCannotStoreAlpha() {
         XCTAssertEqual(ImageFormats.catalog.filter { !$0.supportsAlpha }.map(\.key), ["jpeg"])
     }
 
+    func testOnlyWebpHasALosslessMode() {
+        XCTAssertEqual(ImageFormats.catalog.filter(\.hasLosslessMode).map(\.key), ["webp"])
+    }
+
+    func testWebpIsDescribedLikeTheSystemNamesIt() throws {
+        let webp = try XCTUnwrap(ImageFormats.format(forKey: "webp"))
+        XCTAssertEqual(webp.typeIdentifier, "org.webmproject.webp")
+        XCTAssertEqual(webp.displayName, "WebP")
+        XCTAssertTrue(webp.supportsAlpha)
+        XCTAssertFalse(webp.storesOrientation, "browsers do not agree on the EXIF orientation of WebP, so the pixels are rotated instead")
+        XCTAssertTrue(ImageFormats.isSame(detectedType: "org.webmproject.webp", as: webp))
+        XCTAssertFalse(ImageFormats.isSame(detectedType: "public.png", as: webp))
+    }
+
+    func testWebpAppearsOnlyWhenSomeBackendReportsIt() {
+        XCTAssertFalse(ImageFormats.available(writable: ["public.png"]).contains { $0.key == "webp" })
+        XCTAssertTrue(ImageFormats.available(writable: ["public.png", "org.webmproject.webp"]).contains { $0.key == "webp" })
+    }
+
     func testFileExtensionsAreTheUsualOnes() {
         let byKey = Dictionary(uniqueKeysWithValues: ImageFormats.catalog.map { ($0.key, $0.fileExtension) })
-        XCTAssertEqual(byKey, ["png": "png", "jpeg": "jpg", "heic": "heic", "tiff": "tiff", "gif": "gif", "bmp": "bmp", "avif": "avif"])
+        XCTAssertEqual(byKey, ["png": "png", "jpeg": "jpg", "heic": "heic", "tiff": "tiff", "gif": "gif", "bmp": "bmp", "avif": "avif", "webp": "webp"])
     }
 
     // MARK: Capabilities
 
     func testAvailableFormatsAreTheCatalogOnesTheSystemCanWrite() {
-        XCTAssertEqual(ImageFormats.available(writable: everything).map(\.key), ["png", "jpeg", "heic", "tiff", "gif", "bmp", "avif"])
+        XCTAssertEqual(ImageFormats.available(writable: everything).map(\.key), ["png", "jpeg", "heic", "tiff", "gif", "bmp", "avif", "webp"])
         XCTAssertEqual(ImageFormats.available(writable: ["public.png", "public.jpeg"]).map(\.key), ["png", "jpeg"])
     }
 
@@ -49,7 +68,8 @@ final class ImageFormatTests: XCTestCase {
 
     func testLookupByKey() {
         XCTAssertEqual(ImageFormats.format(forKey: "jpeg")?.typeIdentifier, "public.jpeg")
-        XCTAssertNil(ImageFormats.format(forKey: "webp"))
+        XCTAssertEqual(ImageFormats.format(forKey: "webp")?.typeIdentifier, "org.webmproject.webp")
+        XCTAssertNil(ImageFormats.format(forKey: "jxl"))
     }
 
     // MARK: Same-format detection (by content type, not extension)

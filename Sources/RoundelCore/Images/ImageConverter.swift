@@ -4,7 +4,7 @@ import Foundation
 public protocol ImageConverting: Sendable {
     /// - Parameter progress: called once per finished file with `(done, total)`, from any thread.
     /// - Returns: one result per input file, in the same order.
-    func convert(files: [URL], to format: ImageFormat, quality: Double?, progress: @escaping @Sendable (Int, Int) -> Void) async -> [ConversionItemResult]
+    func convert(files: [URL], to format: ImageFormat, options: ImageEncodingOptions, progress: @escaping @Sendable (Int, Int) -> Void) async -> [ConversionItemResult]
 }
 
 /// Runs conversions with limited concurrency. For every file: detect the source type by content, skip files already
@@ -23,7 +23,7 @@ public final class ImageConverter: ImageConverting, Sendable {
         self.fileExists = fileExists
     }
 
-    public func convert(files: [URL], to format: ImageFormat, quality: Double?, progress: @escaping @Sendable (Int, Int) -> Void) async -> [ConversionItemResult] {
+    public func convert(files: [URL], to format: ImageFormat, options: ImageEncodingOptions, progress: @escaping @Sendable (Int, Int) -> Void) async -> [ConversionItemResult] {
         let total = files.count
         guard total > 0 else { return [] }
 
@@ -37,7 +37,7 @@ public final class ImageConverter: ImageConverting, Sendable {
                 guard next < total else { return }
                 let index = next
                 next += 1
-                group.addTask { (index, await self.convertOne(files[index], to: format, quality: quality, names: names)) }
+                group.addTask { (index, await self.convertOne(files[index], to: format, options: options, names: names)) }
             }
             for _ in 0..<min(maxConcurrent, total) { startNext() }
             while let (index, result) = await group.next() {
@@ -52,7 +52,7 @@ public final class ImageConverter: ImageConverting, Sendable {
 
     // MARK: One file
 
-    private func convertOne(_ source: URL, to format: ImageFormat, quality: Double?, names: NameReservations) async -> ConversionItemResult {
+    private func convertOne(_ source: URL, to format: ImageFormat, options: ImageEncodingOptions, names: NameReservations) async -> ConversionItemResult {
         if Task.isCancelled { return .failed(source: source, message: "cancelled") }
         guard FileManager.default.fileExists(atPath: source.path) else { return .failed(source: source, message: "file not found") }
         guard let type = encoder.detectType(of: source) else { return .failed(source: source, message: ImageConversionError.notAnImage.message) }
@@ -64,7 +64,7 @@ public final class ImageConverter: ImageConverting, Sendable {
 
         let outcome: EncodeOutcome
         do {
-            outcome = try encoder.encode(source: source, to: temporary, format: format, quality: quality)
+            outcome = try encoder.encode(source: source, to: temporary, format: format, options: options)
         } catch {
             try? FileManager.default.removeItem(at: temporary)
             return .failed(source: source, message: Self.message(for: error))
@@ -75,7 +75,7 @@ public final class ImageConverter: ImageConverting, Sendable {
         for _ in 0..<50 {
             do {
                 try FileManager.default.moveItem(at: temporary, to: destination)
-                return .converted(source: source, output: destination, note: outcome.note)
+                return .converted(source: source, output: destination, notes: outcome.notes)
             } catch {
                 guard FileManager.default.fileExists(atPath: destination.path) else {
                     try? FileManager.default.removeItem(at: temporary)

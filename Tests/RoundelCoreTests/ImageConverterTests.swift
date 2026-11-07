@@ -86,7 +86,7 @@ final class ImageConverterTests: XCTestCase {
     private func format(_ key: String) -> ImageFormat { ImageFormats.format(forKey: key)! }
 
     private func convert(_ urls: [URL], to key: String, quality: Double? = nil) async -> [ConversionItemResult] {
-        await converter.convert(files: urls, to: format(key), quality: quality, progress: { _, _ in })
+        await converter.convert(files: urls, to: format(key), options: ImageEncodingOptions(quality: quality), progress: { _, _ in })
     }
 
     // MARK: Basics
@@ -195,7 +195,7 @@ final class ImageConverterTests: XCTestCase {
         // The existence check claims the name is free (someone created the file after the check).
         let racing = ImageConverter(encoder: ImageIOEncoder(), fileExists: { _ in false })
 
-        let results = await racing.convert(files: [source], to: format("jpeg"), quality: nil, progress: { _, _ in })
+        let results = await racing.convert(files: [source], to: format("jpeg"), options: ImageEncodingOptions(), progress: { _, _ in })
 
         guard case .converted(_, let output, _)? = results.first else { return XCTFail("\(results)") }
         XCTAssertEqual(output.lastPathComponent, "a 2.jpg")
@@ -334,23 +334,23 @@ final class ImageConverterTests: XCTestCase {
     func testAnAnimatedGifConvertsTheFirstFrameAndSaysSo() async throws {
         let gif = try writeAnimatedGIF(named: "anim.gif", frames: 3)
         let results = await convert([gif], to: "png")
-        guard case .converted(_, let output, let note)? = results.first else { return XCTFail("\(results)") }
-        XCTAssertEqual(note, .firstFrameOnly)
+        guard case .converted(_, let output, let notes)? = results.first else { return XCTFail("\(results)") }
+        XCTAssertEqual(notes, [.firstFrameOnly])
         XCTAssertEqual(CGImageSourceCreateWithURL(output as CFURL, nil).map(CGImageSourceGetCount), 1)
     }
 
     func testAStillGifHasNoNote() async throws {
         let gif = try write(try makeImage(), as: .gif, named: "still.gif")
         let results = await convert([gif], to: "png")
-        guard case .converted(_, _, let note)? = results.first else { return XCTFail("\(results)") }
-        XCTAssertNil(note)
+        guard case .converted(_, _, let notes)? = results.first else { return XCTFail("\(results)") }
+        XCTAssertTrue(notes.isEmpty)
     }
 
     // MARK: Failure cleanup
 
     private struct FailingEncoder: ImageEncoder {
         func detectType(of url: URL) -> String? { "public.png" }
-        func encode(source: URL, to destination: URL, format: ImageFormat, quality: Double?) throws -> EncodeOutcome {
+        func encode(source: URL, to destination: URL, format: ImageFormat, options: ImageEncodingOptions) throws -> EncodeOutcome {
             try Data("partial".utf8).write(to: destination)
             throw ImageConversionError.encodeFailed(format: format.displayName)
         }
@@ -359,7 +359,7 @@ final class ImageConverterTests: XCTestCase {
     func testAFailedEncodeLeavesNoTemporaryFileBehind() async throws {
         let source = try write(try makeImage(), as: .png, named: "a.png")
         let failing = ImageConverter(encoder: FailingEncoder())
-        let results = await failing.convert(files: [source], to: format("jpeg"), quality: nil, progress: { _, _ in })
+        let results = await failing.convert(files: [source], to: format("jpeg"), options: ImageEncodingOptions(), progress: { _, _ in })
         guard case .failed(_, let message)? = results.first else { return XCTFail("\(results)") }
         XCTAssertEqual(message, "the system couldn’t write JPEG")
         XCTAssertEqual(try files(), ["a.png"])
@@ -372,12 +372,12 @@ final class ImageConverterTests: XCTestCase {
         private var inFlight = 0
         private(set) var maxInFlight = 0
         func detectType(of url: URL) -> String? { "public.png" }
-        func encode(source: URL, to destination: URL, format: ImageFormat, quality: Double?) throws -> EncodeOutcome {
+        func encode(source: URL, to destination: URL, format: ImageFormat, options: ImageEncodingOptions) throws -> EncodeOutcome {
             lock.withLock { inFlight += 1; maxInFlight = max(maxInFlight, inFlight) }
             usleep(40_000)
             try Data("x".utf8).write(to: destination)
             lock.withLock { inFlight -= 1 }
-            return EncodeOutcome(note: nil)
+            return EncodeOutcome()
         }
     }
 
@@ -392,7 +392,7 @@ final class ImageConverterTests: XCTestCase {
     func testABatchRunsWithLimitedConcurrency() async throws {
         let encoder = CountingEncoder()
         let limited = ImageConverter(encoder: encoder, maxConcurrent: 3)
-        let results = await limited.convert(files: try dummyFiles(10), to: format("jpeg"), quality: nil, progress: { _, _ in })
+        let results = await limited.convert(files: try dummyFiles(10), to: format("jpeg"), options: ImageEncodingOptions(), progress: { _, _ in })
         XCTAssertEqual(results.count, 10)
         XCTAssertLessThanOrEqual(encoder.maxInFlight, 3)
         XCTAssertGreaterThanOrEqual(encoder.maxInFlight, 2, "it does run in parallel")
@@ -401,13 +401,13 @@ final class ImageConverterTests: XCTestCase {
     func testAConcurrencyOfOneRunsOneAtATime() async throws {
         let encoder = CountingEncoder()
         let serial = ImageConverter(encoder: encoder, maxConcurrent: 1)
-        _ = await serial.convert(files: try dummyFiles(4), to: format("jpeg"), quality: nil, progress: { _, _ in })
+        _ = await serial.convert(files: try dummyFiles(4), to: format("jpeg"), options: ImageEncodingOptions(), progress: { _, _ in })
         XCTAssertEqual(encoder.maxInFlight, 1)
     }
 
     func testProgressCountsEveryFileOnceAndEndsAtTheTotal() async throws {
         let progress = ProgressLog()
-        _ = await ImageConverter(encoder: CountingEncoder()).convert(files: try dummyFiles(10), to: format("jpeg"), quality: nil, progress: { done, total in
+        _ = await ImageConverter(encoder: CountingEncoder()).convert(files: try dummyFiles(10), to: format("jpeg"), options: ImageEncodingOptions(), progress: { done, total in
             progress.add(done, total)
         })
         XCTAssertEqual(progress.dones.sorted(), Array(1...10))
@@ -420,7 +420,7 @@ final class ImageConverterTests: XCTestCase {
         try Data("x".utf8).write(to: text)
         let png = try write(try makeImage(), as: .png, named: "p.png")
         let progress = ProgressLog()
-        _ = await converter.convert(files: [jpeg, text, png], to: format("jpeg"), quality: nil, progress: { done, total in progress.add(done, total) })
+        _ = await converter.convert(files: [jpeg, text, png], to: format("jpeg"), options: ImageEncodingOptions(), progress: { done, total in progress.add(done, total) })
         XCTAssertEqual(progress.dones.sorted(), [1, 2, 3])
     }
 

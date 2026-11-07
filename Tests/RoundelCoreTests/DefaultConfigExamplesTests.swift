@@ -43,6 +43,18 @@ final class DefaultConfigExamplesTests: XCTestCase {
         XCTAssertEqual(ids.count, Set(ids).count)
     }
 
+    func testTheDefaultConfigExplainsLosslessWebp() {
+        XCTAssertTrue(DefaultConfig.json.contains("lossless"))
+        XCTAssertTrue(DefaultConfig.exampleJSON.contains("compression effort"), "quality means effort when lossless is on")
+    }
+
+    func testTheConvertGroupOffersTheLosslessSettingToEditAndWebpAppearsWhenAvailable() throws {
+        guard case .group(let files)? = DefaultConfig.config.ring.first(where: { $0.id == "files" }),
+              case .group(let convert)? = files.children.first(where: { $0.id == "files.convert" }) else { return XCTFail("no Convert group") }
+        XCTAssertEqual(Params(convert.params).bool("lossless"), false)
+        XCTAssertEqual(Params(convert.params).double("quality"), 0.85)
+    }
+
     func testDefaultConfigDocumentsTheOptionalSettings() {
         XCTAssertTrue(DefaultConfig.json.contains("login"))
         XCTAssertTrue(DefaultConfig.json.contains("Roundel Example"), "documents the Shortcut the examples expect")

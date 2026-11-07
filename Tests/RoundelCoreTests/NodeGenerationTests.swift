@@ -96,6 +96,29 @@ final class NodeGenerationTests: XCTestCase {
         }
     }
 
+    func testWebpGetsQualityAndLosslessFromTheGroup() {
+        let caps = allWritable + ["org.webmproject.webp"]
+        let group = generatedGroup(params: .object(["quality": .number(0.6), "lossless": .bool(true)]))
+        let resolved = ConfigResolver.resolve(RoundelConfig(ring: [group]), generators: generators(writable: caps))
+        guard case .group(let g)? = resolved.config.ring.first else { return XCTFail() }
+        let nodes = g.children.compactMap { child -> ActionNode? in if case .action(let a) = child { return a }; return nil }
+        let webp = nodes.first { Params($0.params).string("format") == "webp" }
+        XCTAssertEqual(webp?.title, "WebP")
+        XCTAssertEqual(webp?.icon, .text("WebP"))
+        XCTAssertEqual(Params(webp?.params ?? .null).double("quality"), 0.6)
+        XCTAssertEqual(Params(webp?.params ?? .null).bool("lossless"), true)
+        for other in nodes where Params(other.params).string("format") != "webp" {
+            XCTAssertNil(Params(other.params).bool("lossless"), "only formats with a lossless mode get it: \(other.id)")
+        }
+    }
+
+    func testLosslessThatIsNotABooleanIsIgnored() {
+        let group = generatedGroup(params: .object(["lossless": .string("yes")]))
+        let resolved = ConfigResolver.resolve(RoundelConfig(ring: [group]), generators: generators(writable: ["org.webmproject.webp"]))
+        guard case .group(let g)? = resolved.config.ring.first, case .action(let webp) = g.children[0] else { return XCTFail() }
+        XCTAssertNil(Params(webp.params).bool("lossless"))
+    }
+
     func testNoQualityMeansNoQualityParam() {
         let resolved = ConfigResolver.resolve(RoundelConfig(ring: [generatedGroup()]), generators: generators())
         guard case .group(let group)? = resolved.config.ring.first, case .action(let jpeg) = group.children[1] else { return XCTFail() }
