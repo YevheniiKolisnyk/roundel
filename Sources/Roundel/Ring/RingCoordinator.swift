@@ -1,23 +1,32 @@
 import AppKit
 import KeyboardShortcuts
+import SwiftUI
 import RoundelCore
 
-/// Glue: hotkey events and pointer events go into `RingInteraction`; its outcomes drive the panel.
-/// Holds no ring logic of its own beyond translating screen coordinates to ring offsets.
+/// Glue: hotkey and pointer events go into `RingInteraction`; its outcomes drive the panel and the view model.
+/// Holds no navigation logic of its own beyond translating screen coordinates to ring offsets.
 @MainActor
 final class RingCoordinator {
-    private let settings: RingSettings
+    private let iconStore: IconStore
     private let model = RingModel()
     private let panel: RingPanel
     private var interaction = RingInteraction()
-    private var geometry = RingLayout.geometry(sectionCount: PlaceholderRing.defaultCount)
 
+    /// Config for the ring that is open right now. A reload while the ring is open waits until it closes.
+    private var activeConfig = DefaultConfig.config
+    private var pendingConfig: RoundelConfig?
+
+    private var metrics = RingMetrics.make(sectionCount: 1)
+    private var maxOuterRadius = RingMetrics.defaultMaxOuterRadius
     private var pollTimer: Timer?
     private var clickMonitors: [Any] = []
 
-    init(settings: RingSettings) {
-        self.settings = settings
-        self.panel = RingPanel(rootView: RingView(model: model))
+    /// M3 plugs the action registry in here: actions it does not know get dimmed and warn when chosen.
+    var isActionAvailable: (ActionNode) -> Bool = { _ in true }
+
+    init(iconStore: IconStore) {
+        self.iconStore = iconStore
+        self.panel = RingPanel(rootView: RingView(model: model), side: RingMetrics.make(sectionCount: 1).panelSide)
     }
 
     func start() {
@@ -28,20 +37,45 @@ final class RingCoordinator {
             MainActor.assumeIsolated { self?.hotkeyUp() }
         }
         KeyboardShortcuts.onKeyDown(for: .dismissRing) { [weak self] in
-            MainActor.assumeIsolated { self?.apply(self?.interaction.escape() ?? .none) }
+            MainActor.assumeIsolated { self?.escape() }
         }
         // Registering a handler enables the shortcut immediately; Esc must only be live while the ring is open.
         KeyboardShortcuts.disable(.dismissRing)
     }
 
+    // MARK: Config
+
+    func applyConfig(_ config: RoundelConfig) {
+        if interaction.isOpen {
+            pendingConfig = config
+        } else {
+            activate(config)
+        }
+    }
+
+    private func activate(_ config: RoundelConfig) {
+        activeConfig = config
+        pendingConfig = nil
+        iconStore.reload(for: config)
+
+        for level in RingMetrics.crowdedLevels(in: config) {
+            let where_ = level.path.isEmpty ? "the top ring" : "group '\(level.path.joined(separator: " > "))'"
+            Log.warning("\(where_) has \(level.count) sections, more than fit comfortably on screen. Consider grouping some of them.")
+        }
+    }
+
     // MARK: Hotkey
 
     private func hotkeyDown() {
-        apply(interaction.hotkeyDown(mode: settings.openMode))
+        apply(interaction.hotkeyDown(config: activeConfig))
     }
 
     private func hotkeyUp() {
         apply(interaction.hotkeyUp())
+    }
+
+    private func escape() {
+        apply(interaction.escape())
     }
 
     // MARK: Outcomes
@@ -52,9 +86,12 @@ final class RingCoordinator {
             break
         case .opened:
             open()
-        case .select(let index):
-            // Milestone 1 has no actions: report the selection and close.
-            Log.info("Selected section \(index + 1) of \(model.sections.count)")
+        case .levelChanged:
+            withAnimation(.easeOut(duration: 0.1)) { showCurrentLevel() }
+            // The ring under the cursor is new: tell the state machine where the cursor sits in it.
+            pollPointer()
+        case .select(let id):
+            run(actionWithID: id)
             close()
         case .dismiss:
             close()
@@ -65,18 +102,16 @@ final class RingCoordinator {
         let started = DispatchTime.now()
         let frontmostBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
 
-        let sections = PlaceholderRing.sections(count: settings.sectionCount)
-        geometry = RingLayout.geometry(sectionCount: sections.count)
-        model.sections = sections
-        model.highlighted = nil
-
-        panel.show(centeredOn: NSEvent.mouseLocation)
+        let mouse = NSEvent.mouseLocation
+        maxOuterRadius = Self.maxOuterRadius(at: mouse)
+        showCurrentLevel()
+        panel.show(centeredOn: mouse, side: metrics.panelSide)
         pollPointer()
         startTracking()
         KeyboardShortcuts.enable(.dismissRing)
 
         let millis = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
-        Log.info("Ring opened in \(String(format: "%.1f", millis)) ms (\(settings.openMode.rawValue), \(sections.count) sections)")
+        Log.info("Ring opened in \(String(format: "%.1f", millis)) ms (\(interaction.mode.rawValue), \(interaction.currentNodes.count) sections)")
 
         // Focus check: the frontmost app must be the same one after we show the panel.
         let after = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -90,6 +125,46 @@ final class RingCoordinator {
         KeyboardShortcuts.disable(.dismissRing)
         panel.hide()
         model.highlighted = nil
+        model.dwellProgress = nil
+        if let pendingConfig { activate(pendingConfig) }
+    }
+
+    /// Rebuilds the view model and panel size for the level the state machine is on.
+    private func showCurrentLevel() {
+        let nodes = interaction.currentNodes
+        metrics = RingMetrics.make(sectionCount: nodes.count, maxOuterRadius: maxOuterRadius)
+
+        model.items = RingItem.items(for: nodes, isAvailable: isActionAvailable).map {
+            DisplayItem(item: $0, icon: iconStore.resolve($0))
+        }
+        model.metrics = metrics
+        model.depth = interaction.depth
+        model.highlighted = nil
+        model.dwellProgress = nil
+        model.levelToken += 1
+
+        if panel.isVisible { panel.resize(side: metrics.panelSide) }
+    }
+
+    // MARK: Action stub
+
+    private func run(actionWithID id: String) {
+        guard case .action(let action)? = activeConfig.node(withID: id) else {
+            Log.warning("Selected '\(id)' but it is not an action node")
+            return
+        }
+        guard isActionAvailable(action) else {
+            Log.warning("Action '\(action.action)' (node '\(action.id)') is not available; skipped")
+            return
+        }
+        // Milestone 2: actions are log-only stubs.
+        Log.info("Run action '\(action.action)' [node '\(action.id)', \"\(action.title)\"] params=\(Self.compact(action.params))")
+    }
+
+    private static func compact(_ value: JSONValue) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return (try? encoder.encode(value)).flatMap { String(data: $0, encoding: .utf8) } ?? "?"
     }
 
     // MARK: Pointer tracking
@@ -128,25 +203,35 @@ final class RingCoordinator {
 
     private func pollPointer() {
         guard interaction.isOpen else { return }
-        let section = hoveredSection()
-        guard section != interaction.highlighted else { return }
-        interaction.pointerMoved(section: section)
-        model.highlighted = section
+        let now = ProcessInfo.processInfo.systemUptime
+        let offset = pointerOffset()
+        let section = metrics.geometry.sectionIndex(dx: offset.dx, dy: offset.dy)
+
+        let outcome = interaction.update(section: section, now: now)
+        if outcome != .none {
+            apply(outcome)
+            return
+        }
+
+        if model.highlighted != interaction.highlighted { model.highlighted = interaction.highlighted }
+        let progress = interaction.dwellProgress(at: now)
+        if model.dwellProgress != progress { model.dwellProgress = progress }
     }
 
     private func pointerClicked() {
-        // Clicks only count on the drawn ring; the dead zone, the transparent panel corners and everything
-        // outside are "nothing", which dismisses a click-required ring.
         let offset = pointerOffset()
-        let section = geometry.isWithinRing(dx: offset.dx, dy: offset.dy)
-            ? geometry.sectionIndex(dx: offset.dx, dy: offset.dy)
-            : nil
-        apply(interaction.click(section: section))
-    }
+        let geometry = metrics.geometry
+        let distance = hypot(offset.dx, offset.dy)
 
-    private func hoveredSection() -> Int? {
-        let offset = pointerOffset()
-        return geometry.sectionIndex(dx: offset.dx, dy: offset.dy)
+        let target: ClickTarget
+        if distance < metrics.deadZoneRadius {
+            target = .center
+        } else if geometry.isWithinRing(dx: offset.dx, dy: offset.dy), let section = geometry.sectionIndex(dx: offset.dx, dy: offset.dy) {
+            target = .section(section)
+        } else {
+            target = .outside   // beyond the drawn ring, the transparent panel corners, or another app
+        }
+        apply(interaction.click(target))
     }
 
     /// Cursor offset from the ring center, y-up, in screen points.
@@ -154,5 +239,13 @@ final class RingCoordinator {
         let mouse = NSEvent.mouseLocation
         let center = panel.ringCenter
         return (Double(mouse.x - center.x), Double(mouse.y - center.y))
+    }
+
+    /// Keeps the largest ring inside the screen the cursor is on.
+    private static func maxOuterRadius(at point: CGPoint) -> Double {
+        let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
+        guard let frame = screen?.visibleFrame else { return RingMetrics.defaultMaxOuterRadius }
+        let fits = (Double(min(frame.width, frame.height)) / 2).rounded(.down) - RingMetrics.panelPadding - 8
+        return min(RingMetrics.defaultMaxOuterRadius, max(RingMetrics.minOuterRadius, fits))
     }
 }

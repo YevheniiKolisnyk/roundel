@@ -1,23 +1,21 @@
 import AppKit
-import RoundelCore
 
-/// Temporary scaffolding (milestone 1): open mode, section count, hotkey, quit.
-/// Replaced by JSON config in milestone 2 and a real settings UI in milestone 7. Quit stays.
+/// Status-bar menu. Open mode and section settings now live in config.json; this keeps what a config file cannot do:
+/// the hotkey recorder, shortcuts to the config, and Quit. The hotkey stays in UserDefaults via KeyboardShortcuts.
 @MainActor
 final class StatusMenuController: NSObject, NSMenuDelegate {
-    private static let sectionChoices = Array(2...12) + [16, 24]
-
-    private let settings: RingSettings
+    private let store: ConfigStore
     private let hotkeyWindow = HotkeyWindowController()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let modeMenu = NSMenu()
-    private let countMenu = NSMenu()
 
-    init(settings: RingSettings) {
-        self.settings = settings
+    init(store: ConfigStore) {
+        self.store = store
         super.init()
         configureButton()
-        statusItem.menu = buildMenu()
+        let menu = NSMenu()
+        menu.delegate = self
+        statusItem.menu = menu
+        rebuild(menu)
     }
 
     private func configureButton() {
@@ -29,68 +27,48 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func buildMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        let modeItem = NSMenuItem(title: "Open Mode", action: nil, keyEquivalent: "")
-        for mode in OpenMode.allCases {
-            let item = NSMenuItem(title: mode.menuTitle, action: #selector(selectMode(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = mode.rawValue
-            modeMenu.addItem(item)
-        }
-        modeMenu.delegate = self
-        modeItem.submenu = modeMenu
-        menu.addItem(modeItem)
-
-        let countItem = NSMenuItem(title: "Sections", action: nil, keyEquivalent: "")
-        for count in Self.sectionChoices {
-            let item = NSMenuItem(title: "\(count)", action: #selector(selectCount(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = count
-            countMenu.addItem(item)
-        }
-        countMenu.delegate = self
-        countItem.submenu = countMenu
-        menu.addItem(countItem)
-
-        menu.addItem(.separator())
-
-        let hotkeyItem = NSMenuItem(title: "Set Hotkey…", action: #selector(openHotkeyWindow), keyEquivalent: "")
-        hotkeyItem.target = self
-        menu.addItem(hotkeyItem)
-
-        menu.addItem(.separator())
-
-        let quitItem = NSMenuItem(title: "Quit Roundel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quitItem)
-
-        return menu
-    }
-
-    // Refresh checkmarks each time a submenu opens.
+    // Rebuilt every time the menu opens so the config-error line is always current.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        if menu === modeMenu {
-            for item in menu.items {
-                item.state = (item.representedObject as? String) == settings.openMode.rawValue ? .on : .off
-            }
-        } else if menu === countMenu {
-            for item in menu.items {
-                item.state = item.tag == settings.sectionCount ? .on : .off
-            }
+        rebuild(menu)
+    }
+
+    private func rebuild(_ menu: NSMenu) {
+        menu.removeAllItems()
+
+        if let failure = store.lastFailure {
+            let error = NSMenuItem(title: "⚠︎ Config error: \(failure.summary)", action: #selector(openConfigFile), keyEquivalent: "")
+            error.target = self
+            error.toolTip = failure.description + "\n\nClick to open config.json. Roundel keeps using the last working config."
+            menu.addItem(error)
+            menu.addItem(.separator())
         }
+
+        menu.addItem(item("Set Hotkey…", #selector(openHotkeyWindow)))
+        menu.addItem(item("Open Config Folder", #selector(openConfigFolder)))
+        menu.addItem(item("Reload Config", #selector(reloadConfig)))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit Roundel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
-    @objc private func selectMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let mode = OpenMode(rawValue: raw) else { return }
-        settings.openMode = mode
-    }
-
-    @objc private func selectCount(_ sender: NSMenuItem) {
-        settings.sectionCount = sender.tag
+    private func item(_ title: String, _ action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
     }
 
     @objc private func openHotkeyWindow() {
         hotkeyWindow.show()
+    }
+
+    @objc private func openConfigFolder() {
+        NSWorkspace.shared.open(store.directory)
+    }
+
+    @objc private func openConfigFile() {
+        NSWorkspace.shared.open(store.file)
+    }
+
+    @objc private func reloadConfig() {
+        store.reload(userInitiated: true)
     }
 }
