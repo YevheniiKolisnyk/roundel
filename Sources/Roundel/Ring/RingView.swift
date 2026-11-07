@@ -46,6 +46,16 @@ struct RingView: View {
                     .opacity(display.item.isDimmed ? 0.4 : 1)
                     .position(WedgeShape.point(center: CGPoint(x: side / 2, y: side / 2), radius: metrics.iconRadius, angle: center))
 
+                if display.item.isActive == true {
+                    // Toggle is currently on (caffeinate, dark mode, mute).
+                    let icon = WedgeShape.point(center: CGPoint(x: side / 2, y: side / 2), radius: metrics.iconRadius, angle: center)
+                    Circle()
+                        .fill(Color.green)
+                        .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
+                        .frame(width: 10, height: 10)
+                        .position(x: icon.x + metrics.iconSize * 0.62, y: icon.y - metrics.iconSize * 0.62)
+                }
+
                 if display.item.isGroup {
                     // Chevron near the outer edge, pointing outwards: "this opens a sub-ring".
                     Image(systemName: "chevron.compact.up")

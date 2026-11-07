@@ -8,6 +8,8 @@ import RoundelCore
 @MainActor
 final class RingCoordinator {
     private let iconStore: IconStore
+    private let registry: ActionRegistry
+    private let executor: ActionExecutor
     private let model = RingModel()
     private let panel: RingPanel
     private var interaction = RingInteraction()
@@ -21,11 +23,10 @@ final class RingCoordinator {
     private var pollTimer: Timer?
     private var clickMonitors: [Any] = []
 
-    /// M3 plugs the action registry in here: actions it does not know get dimmed and warn when chosen.
-    var isActionAvailable: (ActionNode) -> Bool = { _ in true }
-
-    init(iconStore: IconStore) {
+    init(iconStore: IconStore, registry: ActionRegistry, executor: ActionExecutor) {
         self.iconStore = iconStore
+        self.registry = registry
+        self.executor = executor
         self.panel = RingPanel(rootView: RingView(model: model), side: RingMetrics.make(sectionCount: 1).panelSide)
     }
 
@@ -134,7 +135,12 @@ final class RingCoordinator {
         let nodes = interaction.currentNodes
         metrics = RingMetrics.make(sectionCount: nodes.count, maxOuterRadius: maxOuterRadius)
 
-        model.items = RingItem.items(for: nodes, isAvailable: isActionAvailable).map {
+        model.items = RingItem.items(
+            for: nodes,
+            isAvailable: { [registry] in registry.isAvailable($0) },
+            isActive: { [registry] in registry.isActive($0) },
+            defaultIcon: { [registry] in registry.defaultIcon(for: $0) }
+        ).map {
             DisplayItem(item: $0, icon: iconStore.resolve($0))
         }
         model.metrics = metrics
@@ -146,25 +152,15 @@ final class RingCoordinator {
         if panel.isVisible { panel.resize(side: metrics.panelSide) }
     }
 
-    // MARK: Action stub
+    // MARK: Running actions
 
     private func run(actionWithID id: String) {
         guard case .action(let action)? = activeConfig.node(withID: id) else {
             Log.warning("Selected '\(id)' but it is not an action node")
             return
         }
-        guard isActionAvailable(action) else {
-            Log.warning("Action '\(action.action)' (node '\(action.id)') is not available; skipped")
-            return
-        }
-        // Milestone 2: actions are log-only stubs.
-        Log.info("Run action '\(action.action)' [node '\(action.id)', \"\(action.title)\"] params=\(Self.compact(action.params))")
-    }
-
-    private static func compact(_ value: JSONValue) -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return (try? encoder.encode(value)).flatMap { String(data: $0, encoding: .utf8) } ?? "?"
+        // The ring is already closing; the action runs on its own so a slow one never holds the UI.
+        Task { await executor.execute(action) }
     }
 
     // MARK: Pointer tracking

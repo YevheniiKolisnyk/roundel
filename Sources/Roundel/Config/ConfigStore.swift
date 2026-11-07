@@ -33,6 +33,12 @@ final class ConfigStore {
             Log.warning("Could not create the default config at \(file.path): \(error.localizedDescription)")
         }
 
+        do {
+            try DefaultConfig.writeExample(in: directory)
+        } catch {
+            Log.warning("Could not write \(DefaultConfig.exampleFileName): \(error.localizedDescription)")
+        }
+
         // Make sure the ring gets the initial config exactly once, even when the file equals the built-in default.
         if !reload(userInitiated: false) { onChange?(state.config) }
 

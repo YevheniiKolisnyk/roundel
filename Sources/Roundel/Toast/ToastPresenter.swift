@@ -10,6 +10,8 @@ final class ToastPresenter {
 
     func show(_ message: String, isError: Bool = false) {
         hideTask?.cancel()
+        // Toasts vanish after a few seconds; keep a trace for diagnosing and for scripted checks.
+        Log.info("toast\(isError ? " (error)" : ""): \(message.replacingOccurrences(of: "\n", with: " / "))")
 
         let hosting = NSHostingView(rootView: ToastView(message: message, isError: isError))
         hosting.sizingOptions = []
