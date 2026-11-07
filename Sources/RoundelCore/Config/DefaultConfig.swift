@@ -45,6 +45,13 @@ public enum DefaultConfig {
         "                     (default \"Toggle Do Not Disturb\"). Create it in Shortcuts with the \"Set Focus\" action.",
         "  media.playPause, media.next, media.previous   media keys. The first use asks for the Accessibility permission.",
         "  volume.muteToggle  mutes or unmutes the current output device.",
+        "  text.case          mode: \"upper\", \"lower\", \"title\", \"sentence\" or \"toggle\". Changes the case of the selected text in the app",
+        "                     in front. Needs the Accessibility permission. It copies the selection and pastes the result;",
+        "                     your clipboard is put back afterwards. Nothing selected, or a password field: a short message.",
+        "  text.pastePlain    pastes the clipboard as plain text (no formatting). The clipboard keeps its formatting.",
+        "  text.swapLayout    language: \"uk\" (Ukrainian) or \"ru\" (Russian); switchInputSource: true also switches the keyboard",
+        "                     layout to the one you meant. Fixes text typed in the wrong layout, English <-> Ukrainian/Russian;",
+        "                     the direction is detected from the text. Layouts: Ukrainian - PC, Russian - PC, U.S.",
         "  log                writes params.message to the log."
       ],
       "version": 1,
@@ -108,6 +115,39 @@ public enum DefaultConfig {
             { "type": "action", "id": "media.playpause", "title": "Play / Pause", "action": "media.playPause" },
             { "type": "action", "id": "media.next", "title": "Next", "action": "media.next" },
             { "type": "action", "id": "media.previous", "title": "Previous", "action": "media.previous" }
+          ]
+        },
+        {
+          "type": "group",
+          "id": "text",
+          "title": "Text",
+          "icon": { "symbol": "textformat" },
+          "_comment": "Actions on the selected text of the app in front. They need the Accessibility permission.",
+          "children": [
+            {
+              "type": "group",
+              "id": "text.case",
+              "title": "Case",
+              "icon": { "symbol": "textformat.abc" },
+              "children": [
+                { "type": "action", "id": "text.upper", "title": "UPPER", "icon": { "symbol": "textformat.size.larger" },
+                  "action": "text.case", "params": { "mode": "upper" } },
+                { "type": "action", "id": "text.lower", "title": "lower", "icon": { "symbol": "textformat.size.smaller" },
+                  "action": "text.case", "params": { "mode": "lower" } },
+                { "type": "action", "id": "text.title", "title": "Title Case",
+                  "action": "text.case", "params": { "mode": "title" } },
+                { "type": "action", "id": "text.sentence", "title": "Sentence case",
+                  "action": "text.case", "params": { "mode": "sentence" } },
+                { "type": "action", "id": "text.toggle", "title": "tOGGLE",
+                  "action": "text.case", "params": { "mode": "toggle" } }
+              ]
+            },
+            { "type": "action", "id": "text.plain", "title": "Paste plain",
+              "action": "text.pastePlain" },
+            { "type": "action", "id": "text.fixUk", "title": "Fix layout (UA)", "icon": { "emoji": "🇺🇦" },
+              "action": "text.swapLayout", "params": { "language": "uk", "switchInputSource": true } },
+            { "type": "action", "id": "text.fixRu", "title": "Fix layout (RU)", "icon": { "symbol": "keyboard" },
+              "action": "text.swapLayout", "params": { "language": "ru", "switchInputSource": true } }
           ]
         },
         {

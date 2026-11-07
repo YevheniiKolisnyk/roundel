@@ -95,6 +95,9 @@ public struct ActionRegistry: Sendable {
             MediaNextAction(media: s.media),
             MediaPreviousAction(media: s.media),
             MuteToggleAction(mute: s.mute),
+            TextCaseAction(text: s.selectedText),
+            PastePlainAction(text: s.selectedText),
+            SwapLayoutAction(text: s.selectedText, inputSources: s.inputSources),
         ])
     }
 }

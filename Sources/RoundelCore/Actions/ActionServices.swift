@@ -117,11 +117,14 @@ public struct ActionServices: Sendable {
     public var appearance: any AppearanceReading
     public var mute: any MuteControlling
     public var media: any MediaKeySending
+    public var selectedText: any SelectedTextServing
+    public var inputSources: any InputSourceSwitching
     public var logger: any ActionLogging
 
     public init(workspace: any WorkspaceOpening, process: any ProcessRunning, power: any PowerAssertionHolding,
                 screenLocker: any ScreenLocking, appearance: any AppearanceReading, mute: any MuteControlling,
-                media: any MediaKeySending, logger: any ActionLogging) {
+                media: any MediaKeySending, selectedText: any SelectedTextServing, inputSources: any InputSourceSwitching,
+                logger: any ActionLogging) {
         self.workspace = workspace
         self.process = process
         self.power = power
@@ -129,6 +132,8 @@ public struct ActionServices: Sendable {
         self.appearance = appearance
         self.mute = mute
         self.media = media
+        self.selectedText = selectedText
+        self.inputSources = inputSources
         self.logger = logger
     }
 }

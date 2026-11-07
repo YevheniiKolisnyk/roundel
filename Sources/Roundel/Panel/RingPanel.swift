@@ -52,6 +52,9 @@ final class RingPanel: NSPanel {
         setFrame(NSRect(origin: origin, size: CGSize(width: side, height: side)), display: true)
     }
 
+    /// Do not touch `ignoresMouseEvents` here or in `show()`: assigning it (even to `false`) was verified to make the
+    /// window swallow clicks on its transparent pixels, which breaks the click-through outside the ring's footprint.
+    /// The coordinator empties the footprint before calling this, which is what makes a closing panel inert.
     func hide() {
         orderOut(nil)
     }

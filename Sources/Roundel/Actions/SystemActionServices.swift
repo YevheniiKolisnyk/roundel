@@ -27,6 +27,11 @@ extension ActionServices {
             appearance: SystemAppearance(),
             mute: CoreAudioMute(),
             media: MediaKeyPoster(),
+            selectedText: SelectedTextService(
+                pasteboard: SystemPasteboard(), keys: CGEventKeystrokes(), modifiers: SystemModifierWatcher(),
+                secureInput: SystemSecureInput(), clock: SystemAsyncClock()
+            ),
+            inputSources: SystemInputSources(),
             logger: SystemActionLogger()
         )
     }

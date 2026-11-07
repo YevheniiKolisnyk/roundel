@@ -134,11 +134,14 @@ struct Fakes {
     let appearance = FakeAppearance()
     let mute = FakeMute()
     let media = FakeMedia()
+    let selectedText = FakeSelectedText()
+    let inputSources = FakeInputSources()
     let logger = FakeLogger()
 
     var services: ActionServices {
         ActionServices(workspace: workspace, process: process, power: power, screenLocker: screenLocker,
-                       appearance: appearance, mute: mute, media: media, logger: logger)
+                       appearance: appearance, mute: mute, media: media, selectedText: selectedText,
+                       inputSources: inputSources, logger: logger)
     }
 }
 

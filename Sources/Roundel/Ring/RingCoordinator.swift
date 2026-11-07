@@ -153,10 +153,11 @@ final class RingCoordinator {
     private func close() {
         stopTracking()
         KeyboardShortcuts.disable(.dismissRing)
-        panel.hide()
+        // Drop the click footprint first, then stop the panel from taking mouse events, then take it off screen.
+        model.footprint = []
         model.bands = []
         model.highlighted = []
-        model.footprint = []
+        panel.hide()
         if let pendingConfig { activate(pendingConfig) }
     }
 
