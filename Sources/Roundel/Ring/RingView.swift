@@ -7,6 +7,7 @@ struct RingView: View {
     var body: some View {
         let side = model.panelSide
         ZStack {
+            FootprintView(regions: model.footprint)
             ForEach(model.bands) { bandModel in
                 BandView(bandModel: bandModel, highlighted: model.highlighted, side: side)
                     .transition(.opacity)

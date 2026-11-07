@@ -156,6 +156,7 @@ final class RingCoordinator {
         panel.hide()
         model.bands = []
         model.highlighted = []
+        model.footprint = []
         if let pendingConfig { activate(pendingConfig) }
     }
 
@@ -180,6 +181,7 @@ final class RingCoordinator {
             return BandModel(band: band, items: items, connector: connector(for: band))
         }
         model.highlighted = Set(interaction.highlightedItems)
+        model.footprint = layout.footprint
         model.panelSide = metrics.panelSide(forOuterRadius: layout.outerRadius)
         if panel.isVisible { panel.resize(side: model.panelSide) }
     }

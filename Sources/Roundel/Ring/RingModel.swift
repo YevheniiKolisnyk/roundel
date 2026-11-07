@@ -34,4 +34,6 @@ final class RingModel {
     /// The open chain plus the hovered item.
     var highlighted: Set<RingItemRef> = []
     var panelSide = 0.0
+    /// The area the ring owns on screen, gaps included (see `RingLayout.footprint`).
+    var footprint: [RingFootprintRegion] = []
 }
