@@ -44,8 +44,11 @@ public struct ActionRegistry: Sendable {
 
     public func action(for id: String) -> (any Action)? { byID[id] }
 
-    /// False for an unknown action id: the node is shown dimmed. Never a config error.
-    public func isAvailable(_ node: ActionNode) -> Bool { byID[node.action] != nil }
+    /// False for an unknown action id, or one that cannot take what the ring offers right now (`fileDrag`: files are
+    /// being dragged): the node is shown dimmed. Never a config error.
+    public func isAvailable(_ node: ActionNode, fileDrag: Bool = false) -> Bool {
+        byID[node.action]?.isUsable(duringFileDrag: fileDrag) ?? false
+    }
 
     public func defaultIcon(for node: ActionNode) -> Icon? { byID[node.action]?.defaultIcon }
 
@@ -98,6 +101,8 @@ public struct ActionRegistry: Sendable {
             TextCaseAction(text: s.selectedText),
             PastePlainAction(text: s.selectedText),
             SwapLayoutAction(text: s.selectedText, inputSources: s.inputSources),
+            FileOpenWithAction(workspace: s.workspace),
+            ImageConvertAction(converter: s.imageConverter, capabilities: s.imageCapabilities),
         ])
     }
 }

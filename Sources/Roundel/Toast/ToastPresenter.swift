@@ -8,10 +8,15 @@ final class ToastPresenter {
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
 
-    func show(_ message: String, isError: Bool = false) {
+    /// A running action's status ("Converting 4/10"): replaces the toast on screen and is not logged line by line.
+    func showProgress(_ message: String) {
+        show(message, isError: false, logged: false)
+    }
+
+    func show(_ message: String, isError: Bool = false, logged: Bool = true) {
         hideTask?.cancel()
         // Toasts vanish after a few seconds; keep a trace for diagnosing and for scripted checks.
-        Log.info("toast\(isError ? " (error)" : ""): \(message.replacingOccurrences(of: "\n", with: " / "))")
+        if logged { Log.info("toast\(isError ? " (error)" : ""): \(message.replacingOccurrences(of: "\n", with: " / "))") }
 
         let hosting = NSHostingView(rootView: ToastView(message: message, isError: isError))
         hosting.sizingOptions = []

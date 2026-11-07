@@ -13,8 +13,9 @@ final class ConfigWarningsReporter {
         self.toast = toast
     }
 
-    func check(_ config: RoundelConfig) {
-        let warnings = registry.warnings(for: config)
+    /// - Parameter extra: problems found while resolving generated groups.
+    func check(_ config: RoundelConfig, extra: [ActionWarning] = []) {
+        let warnings = registry.warnings(for: config) + extra
         for warning in warnings {
             Log.warning("config: \(warning)")
         }

@@ -12,9 +12,14 @@ final class DefaultConfigExamplesTests: XCTestCase {
         }
     }
 
+    /// The default config as the ring sees it: with the generated groups filled in.
+    private func resolvedDefault() -> RoundelConfig {
+        ConfigResolver.resolve(DefaultConfig.config, generators: NodeGeneratorRegistry.standard(services: Fakes().services)).config
+    }
+
     func testEveryRegisteredActionHasAnExampleInTheDefaultConfig() {
         let registry = ActionRegistry.standard(services: Fakes().services)
-        let used = Set(allActionNodes(DefaultConfig.config.ring).map(\.action))
+        let used = Set(allActionNodes(resolvedDefault().ring).map(\.action))
         for id in registry.ids {
             XCTAssertTrue(used.contains(id), "default config has no example for \(id)")
         }
@@ -22,18 +27,19 @@ final class DefaultConfigExamplesTests: XCTestCase {
 
     func testDefaultConfigHasNoActionWarnings() {
         let registry = ActionRegistry.standard(services: Fakes().services)
-        XCTAssertEqual(registry.warnings(for: DefaultConfig.config), [])
+        XCTAssertEqual(registry.warnings(for: resolvedDefault()), [])
     }
 
     func testDefaultConfigUsesNoUnknownActions() {
         let registry = ActionRegistry.standard(services: Fakes().services)
-        for node in allActionNodes(DefaultConfig.config.ring) {
-            XCTAssertTrue(registry.isAvailable(node), "\(node.id) -> \(node.action)")
+        for node in allActionNodes(resolvedDefault().ring) {
+            // Registered, and usable either with or without a file drag (file actions are dimmed without one).
+            XCTAssertTrue(registry.isAvailable(node) || registry.isAvailable(node, fileDrag: true), "\(node.id) -> \(node.action)")
         }
     }
 
     func testNodeIdsStayUniqueAcrossTheDefaultConfig() {
-        let ids = allActionNodes(DefaultConfig.config.ring).map(\.id)
+        let ids = allActionNodes(resolvedDefault().ring).map(\.id)
         XCTAssertEqual(ids.count, Set(ids).count)
     }
 

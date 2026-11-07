@@ -4,7 +4,15 @@ import SwiftUI
 /// Borderless floating panel that can show above other apps (including fullscreen ones) without ever taking focus.
 /// Square, and resizable around a fixed center because the ring grows with its number of sections.
 final class RingPanel: NSPanel {
-    init(rootView: some View, side: Double) {
+    private let dropView: DropHostingView
+
+    /// Receives the file drags that land on the panel.
+    weak var dropDelegate: RingDropDelegate? {
+        didSet { dropView.dropDelegate = dropDelegate }
+    }
+
+    init(rootView: RingView, side: Double) {
+        dropView = DropHostingView(rootView: rootView)
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: side, height: side),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -24,7 +32,7 @@ final class RingPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
 
-        let hosting = NSHostingView(rootView: rootView)
+        let hosting = dropView
         hosting.sizingOptions = []   // never let SwiftUI resize or re-center the panel
         hosting.frame = NSRect(x: 0, y: 0, width: side, height: side)
         contentView = hosting

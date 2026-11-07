@@ -36,7 +36,7 @@ public struct RingItem: Identifiable, Equatable, Sendable {
                 RingItem(id: action.id, title: action.title, icon: action.icon ?? defaultIcon(action), isGroup: false,
                          isDimmed: !isAvailable(action), isActive: isActive(action))
             case .group(let group):
-                RingItem(id: group.id, title: group.title, icon: group.icon, isGroup: true, isDimmed: false)
+                RingItem(id: group.id, title: group.title, icon: group.icon, isGroup: true, isDimmed: group.children.isEmpty)
             }
         }
     }

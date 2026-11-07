@@ -35,7 +35,7 @@ enum ConfigValidator {
                     issues.append(ConfigIssue(path: "\(path).action", message: "action must not be empty"))
                 }
             case .group(let group):
-                if group.children.isEmpty {
+                if group.children.isEmpty && group.generate == nil {
                     issues.append(ConfigIssue(path: "\(path).children", message: "a group needs at least one child"))
                 }
                 walk(group.children, prefix: "\(path).children", issues: &issues, firstUse: &firstUse)

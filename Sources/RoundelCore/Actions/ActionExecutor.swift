@@ -14,10 +14,20 @@ public final class ActionExecutor {
         self.reporter = reporter
     }
 
-    public func execute(_ node: ActionNode) async {
+    /// - Parameter files: the files dropped on the node, if the ring was used for a file drag.
+    public func execute(_ node: ActionNode, files: [URL] = []) async {
         guard let action = registry.action(for: node.action) else {
             reporter.warning("Node '\(node.id)' uses unknown action '\(node.action)'")
             reporter.toast("Unknown action “\(node.action)” (node “\(node.title)”)", isError: true)
+            return
+        }
+
+        if !files.isEmpty, !action.acceptedInputs.contains(.files) {
+            reporter.toast("\(action.title) doesn’t take files", isError: true)
+            return
+        }
+        if files.isEmpty, action.acceptedInputs.contains(.files), !action.acceptedInputs.contains(.none) {
+            reporter.toast("\(action.title) needs files: drag some from Finder onto it", isError: true)
             return
         }
 
@@ -45,11 +55,16 @@ public final class ActionExecutor {
 
         reporter.info("Run action '\(action.id)' [node '\(node.id)', \"\(node.title)\"] params=\(Self.compact(node.params))")
 
-        let context = ActionContext(nodeID: node.id, title: node.title, params: params)
-        let timeout = action.timeout(for: params)
+        let relay = ProgressRelay(reporter: reporter)
+        let context = ActionContext(nodeID: node.id, title: node.title, params: params, files: files, reportProgress: { relay.send($0) })
+        let timeout = action.timeout(for: params, fileCount: files.count)
         do {
             let result = try await raceWithTimeout(timeout) { try await action.run(context) }
-            if case .message(let text) = result { reporter.toast(text, isError: false) }
+            switch result {
+            case .done: break
+            case .message(let text): reporter.toast(text, isError: false)
+            case .warning(let text): reporter.toast(text, isError: true)
+            }
         } catch is CancellationError {
             reporter.info("Action '\(action.id)' was cancelled")
         } catch let error as ActionTimeoutError {
@@ -61,6 +76,15 @@ public final class ActionExecutor {
         } catch {
             reporter.warning("Action '\(action.id)' [node '\(node.id)'] failed: \(error)")
             reporter.toast("\(action.title): \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    /// Lets an action report progress from any thread; the reporter itself lives on the main actor.
+    private struct ProgressRelay: @unchecked Sendable {
+        let reporter: any ActionReporting
+        func send(_ message: String) {
+            let reporter = reporter
+            Task { @MainActor in reporter.progress(message) }
         }
     }
 

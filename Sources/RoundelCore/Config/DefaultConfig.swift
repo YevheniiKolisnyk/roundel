@@ -25,8 +25,18 @@ public enum DefaultConfig {
         "  {\"symbol\": \"star.fill\"}          an SF Symbol name",
         "  {\"emoji\": \"🚀\"}                  one emoji",
         "  {\"image\": \"icons/my.png\"}        an image file, path relative to this folder",
+        "  {\"text\": \"PNG\"}               a short text (up to 4 letters fit)",
         "Without an icon an action shows its own default icon.",
         "A green dot on a section means that toggle is currently on.",
+        "",
+        "Files: start dragging files from Finder, press the hotkey (hold mode: you can let it go), point at a section and drop.",
+        "Sections that cannot take files are dimmed during the drag; sections that need files are dimmed otherwise.",
+        "Dropping on a group, a gap, the center or outside does nothing and the drag goes back to Finder.",
+        "",
+        "Generated groups: a group may have \"generate\" instead of (or besides) \"children\". Roundel fills it when the config loads:",
+        "  \"generate\": \"image.convert.formats\"   one section per image format this Mac can write (PNG, JPEG, HEIC, TIFF, GIF, BMP, AVIF).",
+        "                                         \"params\": {\"quality\": 0.85} is passed on to the lossy formats (JPEG, HEIC, AVIF).",
+        "  Generated sections get the ids \"<group id>.<format>\". Your own children, if any, come first.",
         "An action id Roundel does not know is shown dimmed and logged; it never breaks the config.",
         "",
         "Actions and their \"params\":",
@@ -45,6 +55,11 @@ public enum DefaultConfig {
         "                     (default \"Toggle Do Not Disturb\"). Create it in Shortcuts with the \"Set Focus\" action.",
         "  media.playPause, media.next, media.previous   media keys. The first use asks for the Accessibility permission.",
         "  volume.muteToggle  mutes or unmutes the current output device.",
+        "  file.openWith      name or bundleId of an app. Opens the dropped files with it. Needs files (drop them on it).",
+        "  image.convert      format (\"png\", \"jpeg\", \"heic\", \"tiff\", \"gif\", \"bmp\", \"avif\"), quality (0-1, lossy formats only).",
+        "                     Converts the dropped images (type is read from the content, not the name). The result goes next to",
+        "                     the original with the new extension; an existing file is never replaced (\"photo 2.jpg\"), originals are",
+        "                     never touched, files already in that format are skipped. Needs files. Normally generated, see above.",
         "  text.case          mode: \"upper\", \"lower\", \"title\", \"sentence\" or \"toggle\". Changes the case of the selected text in the app",
         "                     in front. Needs the Accessibility permission. It copies the selection and pastes the result;",
         "                     your clipboard is put back afterwards. Nothing selected, or a password field: a short message.",
@@ -115,6 +130,28 @@ public enum DefaultConfig {
             { "type": "action", "id": "media.playpause", "title": "Play / Pause", "action": "media.playPause" },
             { "type": "action", "id": "media.next", "title": "Next", "action": "media.next" },
             { "type": "action", "id": "media.previous", "title": "Previous", "action": "media.previous" }
+          ]
+        },
+        {
+          "type": "group",
+          "id": "files",
+          "title": "Files",
+          "icon": { "symbol": "doc.on.doc" },
+          "_comment": "Drop files from Finder on these sections (see the notes at the top).",
+          "children": [
+            {
+              "type": "group",
+              "id": "files.convert",
+              "title": "Convert to",
+              "icon": { "symbol": "photo.on.rectangle.angled" },
+              "_comment": "Filled with one section per image format this Mac can write.",
+              "generate": "image.convert.formats",
+              "params": { "quality": 0.85 }
+            },
+            { "type": "action", "id": "files.preview", "title": "Preview", "icon": { "symbol": "eye" },
+              "action": "file.openWith", "params": { "bundleId": "com.apple.Preview" } },
+            { "type": "action", "id": "files.textedit", "title": "TextEdit", "icon": { "symbol": "doc.text" },
+              "action": "file.openWith", "params": { "name": "TextEdit" } }
           ]
         },
         {

@@ -9,6 +9,7 @@ final class FakeWorkspace: WorkspaceOpening {
     var existing: Set<String> = []
     var openedApps: [URL] = []
     var opened: [URL] = []
+    var openedFiles: [(urls: [URL], app: URL)] = []
     var failure: String?
 
     func applicationURL(forBundleID id: String) -> URL? { bundleIDs[id] }
@@ -22,6 +23,11 @@ final class FakeWorkspace: WorkspaceOpening {
     func open(_ url: URL) async throws {
         if let failure { throw ActionError.failed(failure) }
         opened.append(url)
+    }
+
+    func open(_ urls: [URL], withApplicationAt appURL: URL) async throws {
+        if let failure { throw ActionError.failed(failure) }
+        openedFiles.append((urls, appURL))
     }
 }
 
@@ -119,6 +125,8 @@ final class FakeReporter: ActionReporting {
     private(set) var infos: [String] = []
     private(set) var warnings: [String] = []
     private(set) var toasts: [(message: String, isError: Bool)] = []
+    private(set) var progressMessages: [String] = []
+    func progress(_ message: String) { progressMessages.append(message) }
     func info(_ message: String) { infos.append(message) }
     func warning(_ message: String) { warnings.append(message) }
     func toast(_ message: String, isError: Bool) { toasts.append((message, isError)) }
@@ -135,13 +143,16 @@ struct Fakes {
     let mute = FakeMute()
     let media = FakeMedia()
     let selectedText = FakeSelectedText()
+    let imageConverter = FakeImageConverter()
+    let imageCapabilities = FakeImageCapabilities()
     let inputSources = FakeInputSources()
     let logger = FakeLogger()
 
     var services: ActionServices {
         ActionServices(workspace: workspace, process: process, power: power, screenLocker: screenLocker,
                        appearance: appearance, mute: mute, media: media, selectedText: selectedText,
-                       inputSources: inputSources, logger: logger)
+                       inputSources: inputSources, imageConverter: imageConverter,
+                       imageCapabilities: imageCapabilities, logger: logger)
     }
 }
 

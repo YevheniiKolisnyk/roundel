@@ -8,6 +8,7 @@ struct AppActionReporter: ActionReporting {
     func info(_ message: String) { Log.info(message) }
     func warning(_ message: String) { Log.warning(message) }
     func toast(_ message: String, isError: Bool) { toast.show(message, isError: isError) }
+    func progress(_ message: String) { toast.showProgress(message) }
 }
 
 struct SystemActionLogger: ActionLogging {
@@ -32,6 +33,8 @@ extension ActionServices {
                 secureInput: SystemSecureInput(), clock: SystemAsyncClock()
             ),
             inputSources: SystemInputSources(),
+            imageConverter: ImageConverter(encoder: ImageIOEncoder()),
+            imageCapabilities: SystemImageCapabilities(),
             logger: SystemActionLogger()
         )
     }

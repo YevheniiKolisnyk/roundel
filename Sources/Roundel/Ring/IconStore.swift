@@ -50,6 +50,8 @@ final class IconStore {
             return NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil ? .symbol(name) : letter
         case .emoji(let value)?:
             return .emoji(value)
+        case .text(let value)?:
+            return .letter(value)
         case .image(let path)?:
             return images[path].map(ResolvedIcon.image) ?? letter
         case nil:

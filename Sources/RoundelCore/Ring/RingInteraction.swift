@@ -45,6 +45,8 @@ public struct RingInteraction: Sendable {
     /// The first `pinnedDepth` groups of the chain are pinned (click mode).
     public private(set) var pinnedDepth = 0
     public private(set) var hovered: RingItemRef?
+    /// The ring was opened while files were being dragged: the drop is the commit, not the hotkey release.
+    public private(set) var isDragging = false
 
     public var levelCount: Int { path.count + 1 }
 
@@ -92,9 +94,10 @@ public struct RingInteraction: Sendable {
 
     // MARK: Hotkey
 
-    public mutating func hotkeyDown(config: RoundelConfig) -> RingOutcome {
+    public mutating func hotkeyDown(config: RoundelConfig, dragging: Bool = false) -> RingOutcome {
         if !isOpen {
             isOpen = true
+            isDragging = dragging
             mode = config.settings.openMode
             expandDelay = config.settings.expandDelay
             levels = [config.ring]
@@ -111,12 +114,38 @@ public struct RingInteraction: Sendable {
     }
 
     public mutating func hotkeyUp() -> RingOutcome {
-        guard isOpen, mode == .holdRelease else { return .none }
+        // While files are dragged the drop decides, so releasing the hotkey neither commits nor cancels.
+        guard isOpen, mode == .holdRelease, !isDragging else { return .none }
         guard let hovered, let node = node(at: hovered) else { return close(.dismiss) }
         switch node {
         case .action(let action): return close(.select(action.id))
         case .group: return close(.dismiss)   // releasing on a group cancels
         }
+    }
+
+    // MARK: Drag and drop
+
+    /// Whether a drop on `hit` would run something: only on a leaf (an action) of an open level.
+    public func canDrop(on hit: RingHit) -> Bool {
+        guard isOpen, isDragging, case .item(let level, let index) = hit,
+              let node = node(at: RingItemRef(level: level, index: index)) else { return false }
+        return !node.isGroup
+    }
+
+    /// The files were dropped on `hit`. A leaf runs and the ring closes; anything else (group, gap, center, outside)
+    /// is refused, so the drag goes back to where it came from, and the ring closes.
+    public mutating func drop(on hit: RingHit) -> RingOutcome {
+        guard isOpen, isDragging else { return .none }
+        if canDrop(on: hit), case .item(let level, let index) = hit, case .action(let action)? = node(at: RingItemRef(level: level, index: index)) {
+            return close(.select(action.id))
+        }
+        return close(.dismiss)
+    }
+
+    /// The drag finished without a drop on the ring (the mouse button was let go elsewhere).
+    public mutating func dragEnded() -> RingOutcome {
+        guard isOpen, isDragging else { return .none }
+        return close(.dismiss)
     }
 
     public mutating func escape() -> RingOutcome {
@@ -240,6 +269,7 @@ public struct RingInteraction: Sendable {
 
     private mutating func close(_ outcome: RingOutcome) -> RingOutcome {
         isOpen = false
+        isDragging = false
         path = []
         pinnedDepth = 0
         levels = []

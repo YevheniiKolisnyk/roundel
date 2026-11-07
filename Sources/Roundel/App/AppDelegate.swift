@@ -17,16 +17,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let toast = ToastPresenter()
         let store = ConfigStore(toast: toast)
 
-        let registry = ActionRegistry.standard(services: .system())
+        let services = ActionServices.system()
+        let registry = ActionRegistry.standard(services: services)
+        let generators = NodeGeneratorRegistry.standard(services: services)
         for id in registry.duplicateIDs { Log.warning("Action id '\(id)' is registered twice; the first one wins") }
         let executor = ActionExecutor(registry: registry, permissions: SystemPermissions(), reporter: AppActionReporter(toast: toast))
         let coordinator = RingCoordinator(iconStore: IconStore(baseDirectory: store.directory), registry: registry, executor: executor)
         let warnings = ConfigWarningsReporter(registry: registry, toast: toast)
 
         // The ring is built only from config: wire it up first, then load (which also applies the initial config).
+        // Groups with "generate" are filled in here, so the ring and the checks see the finished config.
         store.onChange = { [weak coordinator, weak warnings] config in
-            coordinator?.applyConfig(config)
-            warnings?.check(config)
+            let resolved = ConfigResolver.resolve(config, generators: generators)
+            coordinator?.applyConfig(resolved.config)
+            warnings?.check(resolved.config, extra: resolved.warnings)
         }
         coordinator.start()
         store.start()

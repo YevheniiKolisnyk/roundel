@@ -9,6 +9,8 @@ public protocol WorkspaceOpening {
     func fileExists(at url: URL) -> Bool
     func openApplication(at url: URL) async throws
     func open(_ url: URL) async throws
+    /// Opens the files with that application.
+    func open(_ urls: [URL], withApplicationAt appURL: URL) async throws
 }
 
 public struct ProcessRequest: Equatable, Sendable {
@@ -107,6 +109,12 @@ public protocol ActionReporting {
     func info(_ message: String)
     func warning(_ message: String)
     func toast(_ message: String, isError: Bool)
+    /// A running action's status ("Converting 4/10"). Replaces the previous one; not logged line by line.
+    func progress(_ message: String)
+}
+
+public extension ActionReporting {
+    func progress(_ message: String) {}
 }
 
 public struct ActionServices: Sendable {
@@ -119,12 +127,14 @@ public struct ActionServices: Sendable {
     public var media: any MediaKeySending
     public var selectedText: any SelectedTextServing
     public var inputSources: any InputSourceSwitching
+    public var imageConverter: any ImageConverting
+    public var imageCapabilities: any ImageCapabilities
     public var logger: any ActionLogging
 
     public init(workspace: any WorkspaceOpening, process: any ProcessRunning, power: any PowerAssertionHolding,
                 screenLocker: any ScreenLocking, appearance: any AppearanceReading, mute: any MuteControlling,
                 media: any MediaKeySending, selectedText: any SelectedTextServing, inputSources: any InputSourceSwitching,
-                logger: any ActionLogging) {
+                imageConverter: any ImageConverting, imageCapabilities: any ImageCapabilities, logger: any ActionLogging) {
         self.workspace = workspace
         self.process = process
         self.power = power
@@ -134,6 +144,8 @@ public struct ActionServices: Sendable {
         self.media = media
         self.selectedText = selectedText
         self.inputSources = inputSources
+        self.imageConverter = imageConverter
+        self.imageCapabilities = imageCapabilities
         self.logger = logger
     }
 }

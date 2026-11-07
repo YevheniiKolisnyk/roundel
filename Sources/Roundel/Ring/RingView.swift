@@ -144,8 +144,10 @@ private struct IconView: View {
                 .scaledToFit()
                 .frame(width: size * 1.15, height: size * 1.15)
         case .letter(let letter):
+            // One letter fills the icon; a short word (a format name like "JPEG") is shrunk to fit the wedge.
             Text(letter)
-                .font(.system(size: size * 0.95, weight: .semibold, design: .rounded))
+                .font(.system(size: size * (letter.count <= 1 ? 0.95 : min(0.7, 2.6 / Double(letter.count))), weight: .semibold, design: .rounded))
+                .lineLimit(1)
                 .foregroundStyle(color)
         }
     }

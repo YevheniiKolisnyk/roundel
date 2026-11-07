@@ -44,27 +44,11 @@ public struct AppOpenAction: Action {
         self.resolver = resolver
     }
 
-    public func extraValidation(_ params: Params) -> [ParamIssue] {
-        if let name = params.string("name"), name.contains("/") {
-            return [ParamIssue(message: "\"name\" must be an application name, not a path (use \"bundleId\" for exactness)", blocksRun: true)]
-        }
-        return []
-    }
+    public func extraValidation(_ params: Params) -> [ParamIssue] { AppLookup.validate(params) }
 
     public func run(_ context: ActionContext) async throws -> ActionResult {
-        if let bundleID = context.params.string("bundleId") {
-            guard let url = await workspace.applicationURL(forBundleID: bundleID) else {
-                throw ActionError.failed("no application with bundle id “\(bundleID)”")
-            }
-            try await workspace.openApplication(at: url)
-            return .done
-        }
-
-        guard let name = context.params.string("name") else { throw ActionError.failed("missing app name") }
-        for url in resolver.candidates(for: name) where await workspace.fileExists(at: url) {
-            try await workspace.openApplication(at: url)
-            return .done
-        }
-        throw ActionError.failed("application “\(name)” not found")
+        let url = try await AppLookup.applicationURL(for: context.params, workspace: workspace, resolver: resolver)
+        try await workspace.openApplication(at: url)
+        return .done
     }
 }

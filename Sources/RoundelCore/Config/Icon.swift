@@ -5,6 +5,8 @@ public enum Icon: Equatable, Sendable, Codable {
     case symbol(String)
     case emoji(String)
     case image(String)
+    /// Short text drawn as the icon, e.g. a file format name ("PNG").
+    case text(String)
 
     private struct Key: CodingKey {
         var stringValue: String
@@ -14,7 +16,7 @@ public enum Icon: Equatable, Sendable, Codable {
         init?(intValue: Int) { nil }
     }
 
-    private static let kinds = ["symbol", "emoji", "image"]
+    private static let kinds = ["symbol", "emoji", "image", "text"]
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Key.self)
@@ -27,8 +29,8 @@ public enum Icon: Equatable, Sendable, Codable {
 
         guard present.count == 1, let kind = present.first else {
             throw fail(present.isEmpty
-                ? "icon needs exactly one of \"symbol\", \"emoji\" or \"image\""
-                : "icon has more than one of \"symbol\", \"emoji\", \"image\" (use exactly one)")
+                ? "icon needs exactly one of \"symbol\", \"emoji\", \"image\" or \"text\""
+                : "icon has more than one of \"symbol\", \"emoji\", \"image\", \"text\" (use exactly one)")
         }
 
         let value = try container.decode(String.self, forKey: Key(kind))
@@ -41,6 +43,9 @@ public enum Icon: Equatable, Sendable, Codable {
                 throw fail("icon emoji must be exactly one emoji, got \"\(value)\"")
             }
             self = .emoji(value)
+        case "text":
+            guard !value.trimmingCharacters(in: .whitespaces).isEmpty else { throw fail("icon text is empty") }
+            self = .text(value)
         default:
             guard ConfigPaths.isSafeRelative(value) else {
                 throw fail("icon image must be a relative path inside the config folder, got \"\(value)\"")
@@ -55,6 +60,7 @@ public enum Icon: Equatable, Sendable, Codable {
         case .symbol(let name): try container.encode(name, forKey: Key("symbol"))
         case .emoji(let value): try container.encode(value, forKey: Key("emoji"))
         case .image(let path): try container.encode(path, forKey: Key("image"))
+        case .text(let value): try container.encode(value, forKey: Key("text"))
         }
     }
 }

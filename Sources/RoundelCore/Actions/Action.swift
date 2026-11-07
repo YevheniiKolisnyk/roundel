@@ -28,6 +28,8 @@ public enum ActionResult: Equatable, Sendable {
     case done
     /// Short feedback shown as a toast, e.g. "Caffeinate on".
     case message(String)
+    /// Like `message`, but something went partly wrong: shown in the error style.
+    case warning(String)
 }
 
 /// A failure with a message that is safe to show to the user as is.
@@ -41,11 +43,18 @@ public struct ActionContext: Sendable {
     public let nodeID: String
     public let title: String
     public let params: Params
+    /// Files dropped on the node (empty when the action was not triggered by a file drag).
+    public let files: [URL]
+    /// Tells the user how a long run is going (e.g. "Converting 4/10"). Safe to call from any thread.
+    public let reportProgress: @Sendable (String) -> Void
 
-    public init(nodeID: String, title: String, params: Params) {
+    public init(nodeID: String, title: String, params: Params, files: [URL] = [],
+                reportProgress: @escaping @Sendable (String) -> Void = { _ in }) {
         self.nodeID = nodeID
         self.title = title
         self.params = params
+        self.files = files
+        self.reportProgress = reportProgress
     }
 }
 
@@ -62,6 +71,8 @@ public protocol Action: Sendable {
 
     /// Upper bound for `run`. When it passes, the run is cancelled and the user sees a timeout toast.
     func timeout(for params: Params) -> Duration
+    /// Same, when the number of dropped files matters. Defaults to `timeout(for:)`.
+    func timeout(for params: Params, fileCount: Int) -> Duration
     /// Checks the rules that `ParamRules` cannot express. Issues with `blocksRun` stop the run.
     func extraValidation(_ params: Params) -> [ParamIssue]
     /// Must honor cancellation (stop work, kill child processes). Failures are thrown as `ActionError`.
@@ -75,6 +86,17 @@ public extension Action {
     var acceptedInputs: Set<ActionInput> { [.none] }
     var permissions: Set<Permission> { [] }
     func timeout(for params: Params) -> Duration { .seconds(15) }
+    func timeout(for params: Params, fileCount: Int) -> Duration { timeout(for: params) }
     func extraValidation(_ params: Params) -> [ParamIssue] { [] }
     @MainActor func isActive(params: Params) -> Bool? { nil }
+}
+
+public extension Action {
+    /// Whether the ring offers this action as usable. During a file drag only actions that take files are; otherwise
+    /// every action is except those that need files. (Selected-text actions need neither: they are usable without a drag.)
+    func isUsable(duringFileDrag: Bool) -> Bool {
+        let takesFiles = acceptedInputs.contains(.files)
+        if duringFileDrag { return takesFiles }
+        return !(takesFiles && !acceptedInputs.contains(.none))
+    }
 }

@@ -110,6 +110,7 @@ final class ActionRegistryTests: XCTestCase {
             "caffeinate.toggle", "screen.lock", "appearance.toggle", "dnd.toggle",
             "media.playPause", "media.next", "media.previous", "volume.muteToggle",
             "text.case", "text.pastePlain", "text.swapLayout",
+            "file.openWith", "image.convert",
         ])
         XCTAssertTrue(registry.duplicateIDs.isEmpty)
         XCTAssertEqual(registry.ids.count, Set(registry.ids).count)
@@ -120,8 +121,9 @@ final class ActionRegistryTests: XCTestCase {
         for id in registry.ids {
             guard let action = registry.action(for: id) else { return XCTFail(id) }
             XCTAssertFalse(action.title.isEmpty, id)
-            // The selected-text actions take text; everything else needs no input.
-            XCTAssertEqual(action.acceptedInputs, id.hasPrefix("text.") ? [.text] : [.none], id)
+            // The selected-text actions take text, the file actions take files; everything else needs no input.
+            let expected: Set<ActionInput> = id.hasPrefix("text.") ? [.text] : (id.hasPrefix("file.") || id.hasPrefix("image.")) ? [.files] : [.none]
+            XCTAssertEqual(action.acceptedInputs, expected, id)
             XCTAssertEqual(action.id, id)
         }
     }

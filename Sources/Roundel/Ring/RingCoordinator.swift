@@ -6,7 +6,7 @@ import RoundelCore
 /// Glue: hotkey and pointer events go into `RingInteraction`; its outcomes drive the panel and the view model.
 /// Holds no navigation logic of its own beyond translating screen coordinates to ring offsets.
 @MainActor
-final class RingCoordinator {
+final class RingCoordinator: RingDropDelegate {
     private let iconStore: IconStore
     private let registry: ActionRegistry
     private let executor: ActionExecutor
@@ -24,6 +24,13 @@ final class RingCoordinator {
     private var limits = ScreenLimits.fallback
     private var pollTimer: Timer?
     private var clickMonitors: [Any] = []
+
+    // File drags: the ring opened while files were being dragged, and the drop is the commit.
+    private let dragProbe = FileDragProbe()
+    private var dragButtonReleasedAt: TimeInterval?
+    private var pendingDropFiles: [URL] = []
+    /// After the mouse button is let go, how long to wait for the drop to arrive before giving up on the drag.
+    private static let dropGrace: TimeInterval = 0.35
 
     /// Size caps and bounds of the screen the ring opened on.
     private struct ScreenLimits {
@@ -44,6 +51,7 @@ final class RingCoordinator {
             rootView: RingView(model: model),
             side: RingMetrics.standard.panelSide(forOuterRadius: RingMetrics.standard.rootMinOuterRadius)
         )
+        panel.dropDelegate = self
     }
 
     func start() {
@@ -89,7 +97,7 @@ final class RingCoordinator {
     // MARK: Hotkey
 
     private func hotkeyDown() {
-        apply(interaction.hotkeyDown(config: activeConfig))
+        apply(interaction.hotkeyDown(config: activeConfig, dragging: dragProbe.fileDragInProgress()))
     }
 
     private func hotkeyUp() {
@@ -115,7 +123,9 @@ final class RingCoordinator {
             // The layout under the pointer is new: tell the state machine what is there now.
             pollPointer()
         case .select(let id):
-            run(actionWithID: id)
+            let files = pendingDropFiles
+            pendingDropFiles = []
+            run(actionWithID: id, files: files)
             close()
         case .dismiss:
             close()
@@ -141,7 +151,7 @@ final class RingCoordinator {
         KeyboardShortcuts.enable(.dismissRing)
 
         let millis = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
-        Log.info("Ring opened in \(String(format: "%.1f", millis)) ms (\(interaction.mode.rawValue), \(interaction.nodes(atLevel: 0).count) sections)")
+        Log.info("Ring opened in \(String(format: "%.1f", millis)) ms (\(interaction.mode.rawValue), \(interaction.nodes(atLevel: 0).count) sections\(interaction.isDragging ? ", file drag" : ""))")
 
         // Focus check: the frontmost app must be the same one after we show the panel.
         let after = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -153,6 +163,9 @@ final class RingCoordinator {
     private func close() {
         stopTracking()
         KeyboardShortcuts.disable(.dismissRing)
+        dragProbe.markConsumed()
+        dragButtonReleasedAt = nil
+        pendingDropFiles = []
         // Drop the click footprint first, then stop the panel from taking mouse events, then take it off screen.
         model.footprint = []
         model.bands = []
@@ -175,7 +188,7 @@ final class RingCoordinator {
         model.bands = layout.bands.map { band in
             let items = RingItem.items(
                 for: interaction.nodes(atLevel: band.level),
-                isAvailable: { [registry] in registry.isAvailable($0) },
+                isAvailable: { [registry, dragging = interaction.isDragging] in registry.isAvailable($0, fileDrag: dragging) },
                 isActive: { [registry] in registry.isActive($0) },
                 defaultIcon: { [registry] in registry.defaultIcon(for: $0) }
             ).map { DisplayItem(item: $0, icon: iconStore.resolve($0)) }
@@ -199,13 +212,13 @@ final class RingCoordinator {
 
     // MARK: Running actions
 
-    private func run(actionWithID id: String) {
+    private func run(actionWithID id: String, files: [URL] = []) {
         guard case .action(let action)? = activeConfig.node(withID: id) else {
             Log.warning("Selected '\(id)' but it is not an action node")
             return
         }
         // The ring is already closing; the action runs on its own so a slow one never holds the UI.
-        Task { await executor.execute(action) }
+        Task { await executor.execute(action, files: files) }
     }
 
     // MARK: Pointer tracking
@@ -256,6 +269,20 @@ final class RingCoordinator {
 
         let highlighted = Set(interaction.highlightedItems)
         if model.highlighted != highlighted { model.highlighted = highlighted }
+
+        if interaction.isDragging { watchForDragEnd(now: now) }
+    }
+
+    /// The mouse button is let go: normally the drop arrives within a moment. If it does not, the drag ended somewhere
+    /// else (or was refused) and the ring has nothing left to wait for.
+    private func watchForDragEnd(now: TimeInterval) {
+        if NSEvent.pressedMouseButtons & 1 != 0 {
+            dragButtonReleasedAt = nil
+            return
+        }
+        let since = dragButtonReleasedAt ?? now
+        dragButtonReleasedAt = since
+        if now - since >= Self.dropGrace { apply(interaction.dragEnded()) }
     }
 
     private func pointerClicked(inThisApp: Bool) {
@@ -267,6 +294,43 @@ final class RingCoordinator {
             hit = .outside   // a click in another app
         }
         apply(interaction.click(hit))
+    }
+
+    // MARK: File drops (RingDropDelegate)
+
+    func dragOperation() -> NSDragOperation {
+        guard interaction.isOpen, interaction.isDragging else { return [] }
+        pollPointer()   // drag callbacks keep coming while the mouse is still, which keeps hover and expand-delay alive
+        return acceptsDrop(on: currentHit()) ? .copy : []
+    }
+
+    func performDrop(_ urls: [URL]) -> Bool {
+        guard interaction.isOpen, interaction.isDragging, !urls.isEmpty else { return false }
+        let hit = currentHit()
+        guard acceptsDrop(on: hit) else {
+            apply(interaction.drop(on: hit))   // refused: the drag goes back, and the ring closes
+            return false
+        }
+        pendingDropFiles = urls
+        apply(interaction.drop(on: hit))
+        return true
+    }
+
+    func dragFinished() {
+        apply(interaction.dragEnded())
+    }
+
+    /// A drop is accepted on an action that takes files (not dimmed during a file drag); never on groups or gaps.
+    private func acceptsDrop(on hit: RingHit) -> Bool {
+        guard interaction.canDrop(on: hit), case .item(let level, let index) = hit else { return false }
+        let nodes = interaction.nodes(atLevel: level)
+        guard nodes.indices.contains(index), case .action(let action) = nodes[index] else { return false }
+        return registry.isAvailable(action, fileDrag: true)
+    }
+
+    private func currentHit() -> RingHit {
+        let offset = pointerOffset()
+        return layout.hit(dx: offset.dx, dy: offset.dy)
     }
 
     /// Cursor offset from the ring center, y-up, in screen points.

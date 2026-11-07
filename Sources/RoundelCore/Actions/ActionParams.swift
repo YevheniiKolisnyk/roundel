@@ -29,6 +29,11 @@ public struct Params: Equatable, Sendable {
         return int
     }
 
+    public func double(_ key: String) -> Double? {
+        if case .number(let value)? = values[key], value.isFinite { return value }
+        return nil
+    }
+
     public func bool(_ key: String) -> Bool? {
         if case .bool(let value)? = values[key] { return value }
         return nil
@@ -47,13 +52,14 @@ public struct Params: Equatable, Sendable {
 }
 
 public struct ParamSpec: Sendable {
-    public enum Kind: Sendable { case string, int, bool, stringList }
+    public enum Kind: Sendable { case string, int, number, bool, stringList }
 
     public let name: String
     public let kind: Kind
     public let isRequired: Bool
     public let allowed: [String]?
     public let range: ClosedRange<Int>?
+    public var numberRange: ClosedRange<Double>? = nil
 
     public static func string(_ name: String, required: Bool = false, allowed: [String]? = nil) -> ParamSpec {
         ParamSpec(name: name, kind: .string, isRequired: required, allowed: allowed, range: nil)
@@ -61,6 +67,10 @@ public struct ParamSpec: Sendable {
 
     public static func int(_ name: String, required: Bool = false, range: ClosedRange<Int>? = nil) -> ParamSpec {
         ParamSpec(name: name, kind: .int, isRequired: required, allowed: nil, range: range)
+    }
+
+    public static func number(_ name: String, required: Bool = false, range: ClosedRange<Double>? = nil) -> ParamSpec {
+        ParamSpec(name: name, kind: .number, isRequired: required, allowed: nil, range: nil, numberRange: range)
     }
 
     public static func bool(_ name: String, required: Bool = false) -> ParamSpec {
@@ -130,6 +140,11 @@ public struct ParamRules: Sendable {
                 return report("\"\(name)\" must be a whole number")
             }
             if let range = spec.range, !range.contains(int) {
+                report("\"\(name)\" must be between \(range.lowerBound) and \(range.upperBound)")
+            }
+        case .number:
+            guard case .number(let number) = value, number.isFinite else { return report("\"\(name)\" must be a number") }
+            if let range = spec.numberRange, !range.contains(number) {
                 report("\"\(name)\" must be between \(range.lowerBound) and \(range.upperBound)")
             }
         case .bool:
