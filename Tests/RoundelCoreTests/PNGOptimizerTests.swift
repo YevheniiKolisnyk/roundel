@@ -291,6 +291,56 @@ final class PNGOptimizerTests: XCTestCase {
         XCTAssertThrowsError(try optimize(TestPNG.make(spec))) { XCTAssertEqual($0 as? PNGOptimizeError, .unsupported) }
     }
 
+    // MARK: How hard it tries depends on how big the picture is
+
+    func testTheSearchEffortDependsOnTheSizeAndOnHowFlatThePictureIs() {
+        let mib = 1 << 20
+        // Light is always quick.
+        XCTAssertEqual(PNGOptimizer.searchPlan(effort: .light, rawBytes: 10, sampleRatio: 0.01), .quick)
+        XCTAssertEqual(PNGOptimizer.searchPlan(effort: .light, rawBytes: 500 * mib, sampleRatio: 0.01), .quick)
+        // Small pictures get the full search however noisy they are.
+        XCTAssertEqual(PNGOptimizer.searchPlan(effort: .thorough, rawBytes: 1 * mib, sampleRatio: 0.9), .full)
+        // Bigger: only flat ones get it, noisy ones a medium search.
+        XCTAssertEqual(PNGOptimizer.searchPlan(effort: .thorough, rawBytes: 20 * mib, sampleRatio: 0.25), .full, "a screenshot")
+        XCTAssertEqual(PNGOptimizer.searchPlan(effort: .thorough, rawBytes: 20 * mib, sampleRatio: 0.26), .ranked, "a photograph")
+        XCTAssertEqual(PNGOptimizer.searchPlan(effort: .thorough, rawBytes: 1 * mib + 1, sampleRatio: 0.9), .ranked)
+        // Beyond 32 MiB of pixel data thorough would take minutes.
+        XCTAssertEqual(PNGOptimizer.searchPlan(effort: .thorough, rawBytes: 32 * mib, sampleRatio: 0.9), .ranked)
+        XCTAssertEqual(PNGOptimizer.searchPlan(effort: .thorough, rawBytes: 32 * mib + 1, sampleRatio: 0.01), .quick)
+    }
+
+    func testTheSampleRatioTellsFlatFromNoisy() throws {
+        let flat = try PNGFile.parse(TestPNG.make(.init(width: 300, height: 300, colorType: 2, bitDepth: 8, sample: { x, y, _ in (x / 50 + y / 50) * 20 })))
+        var noise = TestNoise(state: 5)
+        let noisy = try PNGFile.parse(TestPNG.make(.init(width: 300, height: 300, colorType: 2, bitDepth: 8, sample: { _, _, _ in noise.next() & 255 })))
+        func ratio(_ file: PNGFile) throws -> Double {
+            let h = file.header
+            let raw = try XCTUnwrap(Zlib.inflate(file.imageData, limit: h.height * (h.rowBytes + 1)))
+            let pixels = try XCTUnwrap(PNGFilter.unfilter(raw, rowBytes: h.rowBytes, height: h.height, step: h.filterStep))
+            return PNGOptimizer.sampleRatio(of: PNGCandidate(header: h, pixels: pixels))
+        }
+        XCTAssertLessThan(try ratio(flat), PNGOptimizer.flatSampleRatio)
+        XCTAssertGreaterThan(try ratio(noisy), PNGOptimizer.flatSampleRatio)
+    }
+
+    func testARankedSearchStillBeatsTheQuickOne() throws {
+        // Force the ranked plan on a small picture through the same code path and compare with the quick one.
+        let source = TestPNG.make(gradient(240, 160, colorType: 2))
+        let file = try PNGFile.parse(source)
+        let h = file.header
+        let raw = try XCTUnwrap(Zlib.inflate(file.imageData, limit: h.height * (h.rowBytes + 1)))
+        let pixels = try XCTUnwrap(PNGFilter.unfilter(raw, rowBytes: h.rowBytes, height: h.height, step: h.filterStep))
+        let quick = try XCTUnwrap(PNGOptimizer.compress(pixels, header: h, plan: .quick))
+        let ranked = try XCTUnwrap(PNGOptimizer.compress(pixels, header: h, plan: .ranked))
+        let full = try XCTUnwrap(PNGOptimizer.compress(pixels, header: h, plan: .full))
+        XCTAssertLessThanOrEqual(ranked.count, quick.count, "it tries the quick one's way too")
+        XCTAssertLessThanOrEqual(full.count, ranked.count)
+        for packed in [quick, ranked, full] {
+            let again = try XCTUnwrap(Zlib.inflate(packed, limit: h.height * (h.rowBytes + 1)))
+            XCTAssertEqual(PNGFilter.unfilter(again, rowBytes: h.rowBytes, height: h.height, step: h.filterStep), pixels, "every plan is lossless")
+        }
+    }
+
     // MARK: Real files from the system's own encoder
 
     func testAnImageIOWrittenPNGKeepsItsPixelsUnderImageIOToo() throws {

@@ -31,8 +31,32 @@ public enum PNGOptimizer {
 
     /// Raw data bigger than this is not attempted: it would need gigabytes of memory.
     static let maxRawBytes = 1_200_000_000
-    /// Raw data up to this size is tried with every filter strategy; bigger data is sampled first.
-    static let fullSearchBytes = 4 << 20
+    /// How much work the search may be. Measured in release: a strongest-level pass over noisy 8-bit RGB costs about 1.5 s per
+    /// megapixel (and trying every strategy took 10 s for one megapixel, 35 s for twelve), but on flat pictures (screenshots,
+    /// graphics: most of what is stored as PNG) the same pass is fast. So the thorough search is for small pictures and for
+    /// pictures that compress well, and everything else gets a medium or quick one.
+    static let smallBytes = 1 << 20
+    static let rankedSearchBytes = 32 << 20
+    /// A sample that deflates (quickly) to at most this share of its size is "flat": cheap to search hard.
+    static let flatSampleRatio = 0.25
+
+    enum SearchPlan: Equatable {
+        /// The adaptive filter heuristic, one deflate at level 6.
+        case quick
+        /// The adaptive heuristic and the strategy that looked best on a sample of rows, each deflated once at level 6.
+        case ranked
+        /// Every filter strategy deflated at the strongest level, then the other zlib strategy on the best.
+        case full
+    }
+
+    /// - Parameter sampleRatio: how well a quick deflate of a sample of the picture compresses (0-1; smaller is flatter).
+    static func searchPlan(effort: Effort, rawBytes: Int, sampleRatio: Double) -> SearchPlan {
+        guard effort == .thorough else { return .quick }
+        if rawBytes <= smallBytes { return .full }
+        if rawBytes > rankedSearchBytes { return .quick }
+        return sampleRatio <= flatSampleRatio ? .full : .ranked
+    }
+
     /// The chunks that may be present while the pixel format is changed.
     static let reductionSafeChunks: Set<String> = ["IHDR", "IDAT", "IEND", "pHYs", "tEXt", "zTXt", "iTXt", "eXIf", "tIME"]
     static let strippedChunks: Set<String> = ["tEXt", "zTXt", "iTXt", "tIME"]
@@ -60,7 +84,8 @@ public enum PNGOptimizer {
 
         var best: (candidate: PNGCandidate, stream: [UInt8], size: Int)?
         for candidate in candidates {
-            guard let packed = compress(candidate.pixels, header: candidate.header, effort: options.effort) else { throw PNGOptimizeError.verificationFailed }
+            let plan = searchPlan(effort: options.effort, rawBytes: candidate.pixels.count, sampleRatio: options.effort == .thorough && candidate.pixels.count > smallBytes ? sampleRatio(of: candidate) : 1)
+            guard let packed = compress(candidate.pixels, header: candidate.header, plan: plan) else { throw PNGOptimizeError.verificationFailed }
             let size = packed.count + candidate.extraChunks.reduce(0) { $0 + $1.data.count + 12 }
             if best == nil || size < best!.size { best = (candidate, packed, size) }
         }
@@ -76,40 +101,62 @@ public enum PNGOptimizer {
 
     // MARK: Compression
 
-    /// The zlib stream of the filtered rows, with the strategy and level that `effort` calls for.
-    static func compress(_ pixels: [UInt8], header: PNGHeader, effort: Effort) -> [UInt8]? {
+    /// The zlib stream of the filtered rows, searched for according to `plan`.
+    static func compress(_ pixels: [UInt8], header: PNGHeader, plan: SearchPlan) -> [UInt8]? {
         let rowBytes = header.rowBytes, height = header.height, step = header.filterStep
-        switch effort {
-        case .light:
+        switch plan {
+        case .quick:
             return Zlib.deflate(PNGFilter.filter(pixels, rowBytes: rowBytes, height: height, step: step, strategy: .adaptive), level: 6)
-        case .thorough:
-            var strategies = PNGFilter.Strategy.allCases
-            if pixels.count > fullSearchBytes {
-                // Rank the strategies on a band of rows from the middle; only the two best get the full treatment.
-                let rows = max(1, min(height, 2_000_000 / max(1, rowBytes)))
-                let start = (height - rows) / 2
-                let band = Array(pixels[(start * rowBytes)..<((start + rows) * rowBytes)])
-                let ranked = strategies.compactMap { strategy -> (PNGFilter.Strategy, Int)? in
-                    let sample = PNGFilter.filter(band, rowBytes: rowBytes, height: rows, step: step, strategy: strategy)
-                    return Zlib.deflate(sample, level: 1).map { (strategy, $0.count) }
-                }.sorted { $0.1 < $1.1 }
-                strategies = ranked.prefix(2).map(\.0)
-            }
-            var best: [UInt8]?
-            var bestFiltered: [UInt8]?
-            var bestStrategy = PNGFilter.Strategy.adaptive
-            for strategy in strategies {
-                let filtered = PNGFilter.filter(pixels, rowBytes: rowBytes, height: height, step: step, strategy: strategy)
-                guard let packed = Zlib.deflate(filtered, level: 9, strategy: strategy == .none ? .standard : .filtered) else { continue }
-                if best == nil || packed.count < best!.count { best = packed; bestFiltered = filtered; bestStrategy = strategy }
-            }
+
+        case .ranked:
+            let ranked = rank(pixels, rowBytes: rowBytes, height: height, step: step)
+            let tried = Set([PNGFilter.Strategy.adaptive] + ranked.prefix(1))
+            return smallest(of: tried, pixels: pixels, header: header, level: 6)
+
+        case .full:
+            guard let best = smallest(of: Set(PNGFilter.Strategy.allCases), pixels: pixels, header: header, level: 9, keepFiltered: true) else { return nil }
             // The other zlib strategy occasionally wins on the best filtering.
-            if let filtered = bestFiltered, let alternative = Zlib.deflate(filtered, level: 9, strategy: bestStrategy == .none ? .filtered : .standard),
-               alternative.count < (best?.count ?? .max) {
-                best = alternative
+            if let alternative = Zlib.deflate(best.filtered, level: 9, strategy: best.strategy == .none ? .filtered : .standard), alternative.count < best.stream.count {
+                return alternative
             }
-            return best
+            return best.stream
         }
+    }
+
+    /// How well a band of rows from the middle of the candidate compresses with a quick deflate (the adaptive filter first).
+    static func sampleRatio(of candidate: PNGCandidate) -> Double {
+        let h = candidate.header
+        let rows = max(1, min(h.height, 1_000_000 / max(1, h.rowBytes)))
+        let start = (h.height - rows) / 2
+        let band = Array(candidate.pixels[(start * h.rowBytes)..<((start + rows) * h.rowBytes)])
+        let filtered = PNGFilter.filter(band, rowBytes: h.rowBytes, height: rows, step: h.filterStep, strategy: .adaptive)
+        guard let packed = Zlib.deflate(filtered, level: 1) else { return 1 }
+        return Double(packed.count) / Double(max(1, band.count))
+    }
+
+    private static func smallest(of strategies: Set<PNGFilter.Strategy>, pixels: [UInt8], header: PNGHeader, level: Int32) -> [UInt8]? {
+        smallest(of: strategies, pixels: pixels, header: header, level: level, keepFiltered: false)?.stream
+    }
+
+    private static func smallest(of strategies: Set<PNGFilter.Strategy>, pixels: [UInt8], header: PNGHeader, level: Int32, keepFiltered: Bool) -> (stream: [UInt8], filtered: [UInt8], strategy: PNGFilter.Strategy)? {
+        var best: (stream: [UInt8], filtered: [UInt8], strategy: PNGFilter.Strategy)?
+        for strategy in PNGFilter.Strategy.allCases where strategies.contains(strategy) {   // allCases: a fixed order, so results are reproducible
+            let filtered = PNGFilter.filter(pixels, rowBytes: header.rowBytes, height: header.height, step: header.filterStep, strategy: strategy)
+            guard let packed = Zlib.deflate(filtered, level: level, strategy: strategy == .none ? .standard : .filtered) else { continue }
+            if best == nil || packed.count < best!.stream.count { best = (packed, keepFiltered ? filtered : [], strategy) }
+        }
+        return best
+    }
+
+    /// The strategies, best first, judged by a quick deflate of a band of rows from the middle of the picture.
+    private static func rank(_ pixels: [UInt8], rowBytes: Int, height: Int, step: Int, sampleBytes: Int = 2_000_000) -> [PNGFilter.Strategy] {
+        let rows = max(1, min(height, sampleBytes / max(1, rowBytes)))
+        let start = (height - rows) / 2
+        let band = Array(pixels[(start * rowBytes)..<((start + rows) * rowBytes)])
+        return PNGFilter.Strategy.allCases.compactMap { strategy -> (PNGFilter.Strategy, Int)? in
+            let sample = PNGFilter.filter(band, rowBytes: rowBytes, height: rows, step: step, strategy: strategy)
+            return Zlib.deflate(sample, level: 1).map { (strategy, $0.count) }
+        }.sorted { $0.1 < $1.1 }.map(\.0)
     }
 
     // MARK: Writing the file
