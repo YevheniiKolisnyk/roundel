@@ -130,6 +130,11 @@ final class FakeReporter: ActionReporting {
     func info(_ message: String) { infos.append(message) }
     func warning(_ message: String) { warnings.append(message) }
     func toast(_ message: String, isError: Bool) { toasts.append((message, isError)) }
+    private(set) var kinds: [ToastKind] = []
+    func toast(_ message: String, kind: ToastKind) {
+        kinds.append(kind)
+        toasts.append((message, kind.isErrorStyle))
+    }
 }
 
 /// A bundle of fakes wired into `ActionServices`, with typed access for assertions.

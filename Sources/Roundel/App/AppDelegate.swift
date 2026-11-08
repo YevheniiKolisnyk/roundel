@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AccessibilityStatus.logCurrent()
         // Probe BEFORE the library registers the shortcut (see HotkeyProbe).
         HotkeyProbe.logOpenRingStatus()
+        logSurface()
 
         let toast = ToastPresenter()
         let store = ConfigStore(toast: toast)
@@ -40,5 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.store = store
         self.coordinator = coordinator
         self.warnings = warnings
+    }
+
+    /// Says which kind of surface everything is drawn on, so `ROUNDEL_SURFACE` is never a mystery.
+    private func logSurface() {
+        let preference = SurfacePreference.fromProcessEnvironment
+        let style = SurfaceStyle.resolve(preference: preference, glassAvailable: Platform.supportsGlass,
+                                         reduceTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency)
+        let reason = preference == .automatic ? "" : " (ROUNDEL_SURFACE=\(preference.rawValue))"
+        Log.info("Surfaces: \(style)\(reason); glass available: \(Platform.supportsGlass)")
     }
 }

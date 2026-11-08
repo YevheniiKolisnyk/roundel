@@ -22,10 +22,10 @@ public final class ActionExecutor {
             await execute(node, files: files)
         case .group(let group)?:
             reporter.warning("Selected '\(id)' but it is a group, not an action")
-            reporter.toast("“\(group.title)” is a group, not an action", isError: true)
+            reporter.toast("“\(group.title)” is a group, not an action", kind: .error)
         case nil:
             reporter.warning("Selected '\(id)' but it is not in the current config")
-            reporter.toast("“\(id)” is not in the current config", isError: true)
+            reporter.toast("“\(id)” is not in the current config", kind: .error)
         }
     }
 
@@ -33,16 +33,16 @@ public final class ActionExecutor {
     public func execute(_ node: ActionNode, files: [URL] = []) async {
         guard let action = registry.action(for: node.action) else {
             reporter.warning("Node '\(node.id)' uses unknown action '\(node.action)'")
-            reporter.toast("Unknown action “\(node.action)” (node “\(node.title)”)", isError: true)
+            reporter.toast("Unknown action “\(node.action)” (node “\(node.title)”)", kind: .error)
             return
         }
 
         if !files.isEmpty, !action.acceptedInputs.contains(.files) {
-            reporter.toast("\(action.title) doesn’t take files", isError: true)
+            reporter.toast("\(action.title) doesn’t take files", kind: .error)
             return
         }
         if files.isEmpty, action.acceptedInputs.contains(.files), !action.acceptedInputs.contains(.none) {
-            reporter.toast("\(action.title) needs files: drag some from Finder onto it", isError: true)
+            reporter.toast("\(action.title) needs files: drag some from Finder onto it", kind: .error)
             return
         }
 
@@ -52,7 +52,7 @@ public final class ActionExecutor {
             reporter.warning("Node '\(node.id)' (\(action.id)): \(issue.message)")
         }
         if let blocking = issues.first(where: \.blocksRun) {
-            reporter.toast("\(action.title): \(blocking.message)", isError: true)
+            reporter.toast("\(action.title): \(blocking.message)", kind: .error)
             return
         }
 
@@ -63,7 +63,7 @@ public final class ActionExecutor {
             case .denied:
                 permissions.request(permission)
                 reporter.warning("Action '\(action.id)' needs the \(permission.displayName) permission")
-                reporter.toast("\(action.title) needs the \(permission.displayName) permission. Allow Roundel in System Settings → Privacy & Security, then try again.", isError: true)
+                reporter.toast("\(action.title) needs the \(permission.displayName) permission. Allow Roundel in System Settings → Privacy & Security, then try again.", kind: .error)
                 return
             }
         }
@@ -77,20 +77,20 @@ public final class ActionExecutor {
             let result = try await raceWithTimeout(timeout) { try await action.run(context) }
             switch result {
             case .done: break
-            case .message(let text): reporter.toast(text, isError: false)
-            case .warning(let text): reporter.toast(text, isError: true)
+            case .message(let text): reporter.toast(text, kind: .success)
+            case .warning(let text): reporter.toast(text, kind: .warning)
             }
         } catch is CancellationError {
             reporter.info("Action '\(action.id)' was cancelled")
         } catch let error as ActionTimeoutError {
             reporter.warning("Action '\(action.id)' [node '\(node.id)'] timed out after \(error.duration)")
-            reporter.toast("\(action.title) timed out after \(Self.seconds(error.duration)) s", isError: true)
+            reporter.toast("\(action.title) timed out after \(Self.seconds(error.duration)) s", kind: .error)
         } catch let error as ActionError {
             reporter.warning("Action '\(action.id)' [node '\(node.id)'] failed: \(error.message)")
-            reporter.toast("\(action.title): \(error.message)", isError: true)
+            reporter.toast("\(action.title): \(error.message)", kind: .error)
         } catch {
             reporter.warning("Action '\(action.id)' [node '\(node.id)'] failed: \(error)")
-            reporter.toast("\(action.title): \(error.localizedDescription)", isError: true)
+            reporter.toast("\(action.title): \(error.localizedDescription)", kind: .error)
         }
     }
 

@@ -1,95 +1,145 @@
 import AppKit
 import SwiftUI
+import RoundelCore
 
-/// Small transient message in the top-right corner. Used instead of system notifications, which crash for an
-/// unbundled executable and would need a permission. Never takes focus and ignores the mouse.
+/// Shows toasts like system banners: top right under the menu bar, newest on top, up to three with "+N more" for the
+/// rest, a progress toast updated in place. Auto-dismiss pauses while the pointer is over the stack. Never takes focus.
+///
+/// What is on screen and when it leaves is decided by `ToastQueue` (pure, tested); this class only shows it.
 @MainActor
 final class ToastPresenter {
-    private var panel: NSPanel?
-    private var hideTask: Task<Void, Never>?
+    private let metrics = DesignMetrics.standard
+    private var queue = ToastQueue()
+    private let model = ToastStackModel()
+    private var panel: ToastPanel?
+    private var anchorArea: NSRect?
+    private var expiryTask: Task<Void, Never>?
+    private var shrinkTask: Task<Void, Never>?
+    private let clock: () -> TimeInterval
+    private let areaProvider: @MainActor () -> NSRect
 
-    /// A running action's status ("Converting 4/10"): replaces the toast on screen and is not logged line by line.
+    private var now: TimeInterval { clock() }
+
+    /// - Parameters:
+    ///   - clock: seconds; replaceable so time can be moved in tests.
+    ///   - areaProvider: the usable area (below the menu bar) of the screen to show on; by default the one under the pointer.
+    init(clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         areaProvider: @escaping @MainActor () -> NSRect = ToastPresenter.areaUnderPointer) {
+        self.clock = clock
+        self.areaProvider = areaProvider
+    }
+
+    // What is shown, for tests.
+    var stackEntries: [ToastQueue.Entry] { model.entries }
+    var stackHiddenCount: Int { model.hiddenCount }
+    var panelForTesting: NSPanel? { panel }
+
+    /// A running action's status ("Converting 4/10"): updated in place, not logged line by line.
     func showProgress(_ message: String) {
-        show(message, isError: false, logged: false)
+        show(message, kind: .progress, logged: false)
     }
 
     func show(_ message: String, isError: Bool = false, logged: Bool = true) {
-        hideTask?.cancel()
-        // Toasts vanish after a few seconds; keep a trace for diagnosing and for scripted checks.
-        if logged { Log.info("toast\(isError ? " (error)" : ""): \(message.replacingOccurrences(of: "\n", with: " / "))") }
+        show(message, kind: ToastKind(isError: isError), logged: logged)
+    }
 
-        let (content, size) = ToastLayout.content(for: message, isError: isError)
+    func show(_ text: String, kind: ToastKind, logged: Bool = true) {
+        // Toasts vanish after a few seconds; keep a trace for diagnosing and for scripted checks.
+        if logged {
+            let label = kind == .success ? "" : " (\(kind == .warning ? "warning" : "error"))"
+            Log.info("toast\(label): \(text.replacingOccurrences(of: "\n", with: " / "))")
+        }
+        queue.push(ToastMessage.parse(text, kind: kind), now: now)
+        if kind != .progress { announce(text) }
+        refresh()
+    }
+
+    // MARK: Showing what the queue says
+
+    func refresh() {
+        queue.advance(to: now)
+        let entries = queue.visible
+        let changed = entries.map(\.id) != model.entries.map(\.id)
+        let motion = metrics.resolve(metrics.appearMotion, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        withAnimation(changed ? motion.animation : nil) {
+            model.entries = entries
+            model.hiddenCount = queue.hiddenCount
+        }
+        layoutPanel(entries: entries)
+        scheduleExpiry()
+    }
+
+    private func layoutPanel(entries: [ToastQueue.Entry]) {
+        shrinkTask?.cancel()
+        guard !entries.isEmpty else {
+            // Let the exit animation play, then take the window away.
+            shrinkTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))
+                guard !Task.isCancelled, let self, self.queue.entries.isEmpty else { return }
+                self.panel?.orderOut(nil)
+                self.anchorArea = nil
+            }
+            return
+        }
+
+        let size = ToastLayout.stackSize(cardHeights: entries.map { ToastLayout.cardSize(for: $0.message).height }, hasMore: queue.hiddenCount > 0)
+        let area = anchorArea ?? areaProvider()
+        anchorArea = area
+        let target = ToastLayout.panelFrame(size: size, in: area)
 
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        panel.contentView = content
-        panel.setContentSize(size)
-        if panel.frame.width < 1 || panel.frame.height < 1 {
-            // A window with no area is on screen but invisible. It must never be silent about that.
-            Log.warning("Toast window has no area (\(panel.frame.size)); showing it at the default size. Message: \(message)")
-            panel.setContentSize(ToastLayout.usable(.zero))
-        }
-        panel.setFrameOrigin(origin(for: panel.frame.size))
-        panel.alphaValue = 1
-        panel.orderFrontRegardless()
-
-        hideTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(isError ? 6 : 3))
-            guard !Task.isCancelled else { return }
-            self?.fadeOut()
-        }
-    }
-
-    private func fadeOut() {
-        guard let panel else { return }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.25
-            panel.animator().alphaValue = 0
-        }, completionHandler: { [weak panel] in
-            MainActor.assumeIsolated {
-                if panel?.alphaValue == 0 { panel?.orderOut(nil) }
+        if panel.isVisible, target.height < panel.frame.height {
+            // Smaller: keep the room until the toast that left has finished leaving.
+            shrinkTask = Task { [weak panel] in
+                try? await Task.sleep(for: .milliseconds(450))
+                guard !Task.isCancelled else { return }
+                panel?.setFrame(target, display: true)
             }
-        })
+        } else {
+            panel.setFrame(target, display: true)
+        }
+        panel.orderFrontRegardless()
     }
 
-    private func makePanel() -> NSPanel {
-        let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-        panel.isFloatingPanel = true
-        panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        panel.hidesOnDeactivate = false
-        panel.ignoresMouseEvents = true
-        panel.isReleasedWhenClosed = false
-        panel.animationBehavior = .none
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
+    private func scheduleExpiry() {
+        expiryTask?.cancel()
+        guard let seconds = queue.secondsUntilNextExpiry else { return }
+        expiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(seconds, 0.01) + 0.02))
+            guard !Task.isCancelled else { return }
+            self?.refresh()
+        }
+    }
+
+    /// The pointer entered or left the stack: while it is over it, nothing expires.
+    func hover(_ inside: Bool) {
+        queue.setPaused(inside, now: now)
+        scheduleExpiry()
+    }
+
+    // MARK: Window
+
+    private func makePanel() -> ToastPanel {
+        let panel = ToastPanel(rootView: ToastStackView(model: model))
+        panel.hostingView.onHover = { [weak self] inside in
+            MainActor.assumeIsolated { self?.hover(inside) }
+        }
         return panel
     }
 
-    private func origin(for size: NSSize) -> NSPoint {
+    /// The usable area (below the menu bar) of the screen the pointer is on.
+    static func areaUnderPointer() -> NSRect {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main ?? NSScreen.screens.first
-        let area = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        return ToastLayout.origin(for: size, in: area)
+        return screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
     }
-}
 
-struct ToastView: View {
-    let message: String
-    let isError: Bool
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                .foregroundStyle(isError ? Color.orange : Color.green)
-            Text(message)
-                .font(.system(size: 12))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.12), lineWidth: 0.5))
+    /// VoiceOver reads the toast aloud; sighted users see it, blind users would otherwise never know.
+    private func announce(_ text: String) {
+        NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested, userInfo: [
+            .announcement: text,
+            .priority: NSAccessibilityPriorityLevel.high.rawValue,
+        ])
     }
 }

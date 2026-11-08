@@ -9,6 +9,7 @@ struct AppActionReporter: ActionReporting {
     func info(_ message: String) { Log.info(message) }
     func warning(_ message: String) { Log.warning(message) }
     func toast(_ message: String, isError: Bool) { toast.show(message, isError: isError) }
+    func toast(_ message: String, kind: ToastKind) { toast.show(message, kind: kind) }
     func progress(_ message: String) { toast.showProgress(message) }
 }
 

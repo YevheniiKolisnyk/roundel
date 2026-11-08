@@ -123,6 +123,25 @@ final class FileInputTests: XCTestCase {
         XCTAssertEqual(reporter.toasts.map(\.message), ["Done"])
     }
 
+    func testTheKindOfEachToastFollowsWhatHappened() async {
+        struct Mixed: Action {
+            var id = "mixed"; var title = "Mixed"; var defaultIcon: Icon = .symbol("x")
+            var paramRules = ParamRules(specs: [.string("mode")])
+            func run(_ context: ActionContext) async throws -> ActionResult {
+                switch context.params.string("mode") {
+                case "warn": return .warning("2 of 3 done · 1 failed")
+                case "fail": throw ActionError.failed("nope")
+                default: return .message("Done")
+                }
+            }
+        }
+        for (mode, kind) in [("ok", ToastKind.success), ("warn", .warning), ("fail", .error)] {
+            let node = ActionNode(id: "n", title: "n", action: "mixed", params: .object(["mode": .string(mode)]))
+            await executor([Mixed()]).execute(node)
+        }
+        XCTAssertEqual(reporter.kinds, [.success, .warning, .error])
+    }
+
     func testAWarningResultIsShownAsAnErrorStyleToast() async {
         struct Partial: Action {
             var id = "partial"; var title = "Partial"; var defaultIcon: Icon = .symbol("x")

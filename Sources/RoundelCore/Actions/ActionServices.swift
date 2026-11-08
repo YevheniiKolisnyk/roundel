@@ -109,11 +109,15 @@ public protocol ActionReporting {
     func info(_ message: String)
     func warning(_ message: String)
     func toast(_ message: String, isError: Bool)
+    /// Same, saying what kind it is (success, warning, error). Reporters that draw the kinds differently implement this;
+    /// the default maps it onto `toast(_:isError:)`.
+    func toast(_ message: String, kind: ToastKind)
     /// A running action's status ("Converting 4/10"). Replaces the previous one; not logged line by line.
     func progress(_ message: String)
 }
 
 public extension ActionReporting {
+    func toast(_ message: String, kind: ToastKind) { toast(message, isError: kind.isErrorStyle) }
     func progress(_ message: String) {}
 }
 
