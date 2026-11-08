@@ -49,6 +49,7 @@ extension MotionSpec {
         switch self {
         case .spring(let response, let dampingFraction): .spring(response: response, dampingFraction: dampingFraction)
         case .fade(let duration): .easeInOut(duration: duration)
+        case .easeOut(let duration): .easeOut(duration: duration)
         }
     }
 }

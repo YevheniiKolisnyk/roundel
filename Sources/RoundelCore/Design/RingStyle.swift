@@ -72,14 +72,19 @@ public struct RingStyle: Equatable, Sendable {
     /// Distance from the band's outer edge to the chevron's center.
     public var chevronInset = 10.0
 
-    // Labels (format names and the like) must fit their cell
+    // Content (labels, icons) must fit its cell
     public var labelBaseSize = 12.0
     public var labelMinSize = 9.0
+    /// Clear space between content and the highlight's edge (or the chevron).
     public var labelPadding = 4.0
+    /// How far content stays from every side of its cell: the highlight's own inset plus the padding.
+    public var contentInset: Double { highlightInset + labelPadding }
+    /// How far from the band's outer rim a group cell's content must stay, so it never meets the chevron.
+    public var chevronClearance: Double { chevronInset + chevronSize / 2 + labelPadding }
 
     // Appearing
-    public var appearScale = 0.94
-    public var arcAppearScale = 0.88
+    public var appearScale = 0.96
+    public var arcAppearScale = 0.96
 
     public init() {}
 
@@ -161,25 +166,82 @@ public struct RingStyle: Equatable, Sendable {
         )
     }
 
-    // MARK: Labels
+    // MARK: Content must stay inside its cell
 
-    /// How wide upright text can be inside a cell that is `thickness` thick (radially) and `tangential` long, whose center
-    /// lies at `angle` from 12 o'clock: the horizontal chord through the middle of the rotated cell, minus padding on
-    /// both sides. Straight up the room is the tangential length; at 3 or 9 o'clock it is the thickness.
-    public func availableTextWidth(thickness: Double, tangential: Double, angle: Double, padding: Double) -> Double {
-        let s = abs(sin(angle)), c = abs(cos(angle))
-        let byThickness = s > 1e-9 ? thickness / s : Double.infinity
-        let byLength = c > 1e-9 ? tangential / c : Double.infinity
-        let room = min(byThickness, byLength)
-        return max(0, (room.isFinite ? room : 0) - 2 * padding)
+    /// Half extents of the box content may occupy, centered on the item's icon point and aligned with the cell: how far
+    /// it may reach radially (either way) and tangentially.
+    public struct CellRoom: Equatable, Sendable {
+        public var halfRadial: Double
+        public var halfTangential: Double
+        public init(halfRadial: Double, halfTangential: Double) {
+            self.halfRadial = halfRadial
+            self.halfTangential = halfTangential
+        }
     }
 
-    /// The font size at which a label measuring `textWidthAtBaseSize` at the base size fits `available`: the base size if
-    /// it already fits, scaled down if not, never below the minimum (what still does not fit is truncated).
-    public func fittedFontSize(textWidthAtBaseSize width: Double, available: Double) -> Double {
-        guard width.isFinite, width > 0 else { return labelBaseSize }
-        guard available > 0 else { return labelMinSize }
-        let scale = available / width
-        return scale >= 1 ? labelBaseSize : max(labelMinSize, labelBaseSize * scale)
+    /// The safe box of an item of `band`: `contentInset` from every side of the cell, and, for a group, also clear of
+    /// the chevron's slot near the outer rim (so content and chevron cannot collide at any angle).
+    public func cellRoom(for band: RingBand, hasChevron: Bool) -> CellRoom {
+        let inward = band.iconRadius - (band.innerRadius + contentInset)
+        let outward = band.outerRadius - (hasChevron ? chevronClearance : contentInset) - band.iconRadius
+        let chordHalf = band.iconRadius * sin(min(band.itemWidth / 2, .pi / 2))
+        return CellRoom(halfRadial: max(0, min(inward, outward)), halfTangential: max(0, chordHalf - contentInset))
+    }
+
+    /// Whether an upright box of `width` x `height`, centered on the icon point of a cell whose center lies at `angle`
+    /// from 12 o'clock, stays inside the cell's safe box. The cell is rotated, the text is not, so the box's corners
+    /// matter, not just its sides.
+    public func fits(width: Double, height: Double, angle: Double, in room: CellRoom) -> Bool {
+        let s = abs(sin(angle)), c = abs(cos(angle))
+        let radial = (width * s + height * c) / 2
+        let tangential = (width * c + height * s) / 2
+        return radial <= room.halfRadial + 1e-9 && tangential <= room.halfTangential + 1e-9
+    }
+
+    /// The widest upright box that is `height` tall and still fits; 0 when even a sliver of that height does not.
+    public func maxWidth(forHeight height: Double, angle: Double, in room: CellRoom) -> Double {
+        guard height.isFinite, height >= 0 else { return 0 }
+        let s = abs(sin(angle)), c = abs(cos(angle))
+        let radialRoom = room.halfRadial - height / 2 * c
+        let tangentialRoom = room.halfTangential - height / 2 * s
+        guard radialRoom >= 0, tangentialRoom >= 0 else { return 0 }
+        let byRadial = s > 1e-9 ? radialRoom / s : Double.infinity
+        let byTangential = c > 1e-9 ? tangentialRoom / c : Double.infinity
+        let half = min(byRadial, byTangential)
+        return half.isFinite ? 2 * half : 0
+    }
+
+    /// The largest factor `k` by which a `width` x `height` box can be scaled (and then drawn at `scale`, e.g. the hover
+    /// enlargement) and still fit. Not capped at 1; an empty box needs no shrinking and gives 1.
+    public func fitScale(width: Double, height: Double, angle: Double, in room: CellRoom, scale: Double) -> Double {
+        let s = abs(sin(angle)), c = abs(cos(angle))
+        let radial = (width * s + height * c) / 2 * scale
+        let tangential = (width * c + height * s) / 2 * scale
+        guard radial > 0 || tangential > 0 else { return 1 }
+        let byRadial = radial > 0 ? room.halfRadial / radial : Double.infinity
+        let byTangential = tangential > 0 ? room.halfTangential / tangential : Double.infinity
+        return max(0, min(byRadial, byTangential))
+    }
+
+    /// How to draw a one-line label: the font size and the widest the text may be (longer text is truncated).
+    public struct LabelFit: Equatable, Sendable {
+        public var fontSize: Double
+        public var maxWidth: Double
+    }
+
+    /// Fits a label measuring `widthAtBaseSize` x `heightAtBaseSize` at the base font size into `room`, for a cell at
+    /// `angle`, drawn at `scale` (hover). Scaled down as far as the minimum size; beyond that it is truncated to what
+    /// fits. Nil when there is no room for even a short line (or the measurements are nonsense): draw nothing.
+    public func labelFit(widthAtBaseSize width: Double, heightAtBaseSize height: Double, angle: Double, in room: CellRoom, scale: Double) -> LabelFit? {
+        guard width.isFinite, width > 0, height.isFinite, height > 0, scale.isFinite, scale > 0 else { return nil }
+        let k = fitScale(width: width, height: height, angle: angle, in: room, scale: scale)
+        let wanted = labelBaseSize * min(1, k)
+        if wanted >= labelMinSize {
+            return LabelFit(fontSize: wanted, maxWidth: width * wanted / labelBaseSize)
+        }
+        let drawnHeight = height * labelMinSize / labelBaseSize * scale
+        let room = maxWidth(forHeight: drawnHeight, angle: angle, in: room) / scale
+        guard room >= labelMinSize else { return nil }
+        return LabelFit(fontSize: labelMinSize, maxWidth: min(room, width * labelMinSize / labelBaseSize))
     }
 }

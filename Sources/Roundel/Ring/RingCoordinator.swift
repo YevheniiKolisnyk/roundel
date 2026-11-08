@@ -19,7 +19,6 @@ final class RingCoordinator: RingDropDelegate {
     private var pendingConfig: RoundelConfig?
 
     private let metrics = RingMetrics.standard
-    private let design = DesignMetrics.standard
     private var layout = RingLayout.make(root: [], path: [])
     private var ringCenter = CGPoint.zero
     private var limits = ScreenLimits.fallback
@@ -120,7 +119,7 @@ final class RingCoordinator: RingDropDelegate {
         case .opened:
             open()
         case .layoutChanged:
-            withAnimation(layoutAnimation) { rebuildLayout() }
+            rebuildLayout()
             // The layout under the pointer is new: tell the state machine what is there now.
             pollPointer()
         case .select(let id):
@@ -147,8 +146,9 @@ final class RingCoordinator: RingDropDelegate {
 
         rebuildLayout()
         panel.show(centeredOn: ringCenter, side: model.panelSide)
-        // The panel (with its click footprint) is up and live; only now do the visuals come in.
-        withAnimation(appearAnimation) { model.isPresented = true }
+        // The panel (with its click footprint) is up and live; only now do the visuals come in. No animation is started
+        // here: the view animates opacity and scale of what is already laid out, and nothing else.
+        model.isPresented = true
         pollPointer()
         startTracking()
         KeyboardShortcuts.enable(.dismissRing)
@@ -217,10 +217,6 @@ final class RingCoordinator: RingDropDelegate {
         if model.hovered != interaction.hovered { model.hovered = interaction.hovered }
     }
 
-    private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-    private var appearAnimation: Animation { design.resolve(design.appearMotion, reduceMotion: reduceMotion).animation }
-    private var layoutAnimation: Animation { design.resolve(design.appearMotion, reduceMotion: reduceMotion).animation }
-
     /// The short stub drawn between a parent section and its arc.
     private func connector(for band: RingBand) -> BandModel.Connector? {
         guard band.level > 0, layout.bands.indices.contains(band.level - 1), interaction.path.indices.contains(band.level - 1) else { return nil }
@@ -283,7 +279,7 @@ final class RingCoordinator: RingDropDelegate {
             let offset = pointerOffset()
             let outcome = interaction.update(hit: layout.hit(dx: offset.dx, dy: offset.dy), now: now)
             guard outcome == .layoutChanged else { break }
-            withAnimation(layoutAnimation) { rebuildLayout() }
+            rebuildLayout()
         }
 
         syncEmphasis()

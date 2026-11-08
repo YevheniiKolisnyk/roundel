@@ -4,6 +4,8 @@ import Foundation
 public enum MotionSpec: Equatable, Sendable {
     case spring(response: Double, dampingFraction: Double)
     case fade(duration: Double)
+    /// A plain ease-out of a fixed length: it settles without overshoot.
+    case easeOut(duration: Double)
 }
 
 /// The design language in numbers, in one place, like `RingMetrics` is for geometry: spacing, type scale, radii,
@@ -53,6 +55,10 @@ public struct DesignMetrics: Equatable, Sendable {
     public var appearMotion = MotionSpec.spring(response: 0.32, dampingFraction: 0.84)
     public var selectionMotion = MotionSpec.spring(response: 0.2, dampingFraction: 0.88)
     public var reducedMotionFade = MotionSpec.fade(duration: 0.12)
+    /// The ring and its arcs coming in: opacity and a small scale only, nothing that moves or overshoots.
+    public var ringAppearMotion = MotionSpec.easeOut(duration: 0.15)
+    /// The highlight changing from one cell to the next: a quick cross-fade.
+    public var ringHighlightMotion = MotionSpec.fade(duration: 0.1)
 
     public init() {}
 

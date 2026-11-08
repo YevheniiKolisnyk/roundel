@@ -154,50 +154,176 @@ final class RingStyleTests: XCTestCase {
         XCTAssertLessThan(g.cornerRadius, (g.outerRadius - g.innerRadius) / 2)
     }
 
-    // MARK: Labels that must fit
+    // MARK: Content must stay inside its cell
 
-    func testHorizontalRoomInACellDependsOnWhereItIs() {
-        // Straight up or down the room is the cell's tangential length; at 3 or 9 o'clock it is its radial thickness.
-        XCTAssertEqual(style.availableTextWidth(thickness: 64, tangential: 120, angle: 0, padding: 0), 120, accuracy: 1e-6)
-        XCTAssertEqual(style.availableTextWidth(thickness: 64, tangential: 120, angle: .pi / 2, padding: 0), 64, accuracy: 1e-6)
-        let diagonal = style.availableTextWidth(thickness: 64, tangential: 120, angle: .pi / 4, padding: 0)
-        XCTAssertLessThan(diagonal, 120)
-        XCTAssertGreaterThan(diagonal, 64)
+    /// A typical arc cell (44 pt wide, 64 pt thick) and the root ring's cells.
+    private func rootBand(count: Int) -> RingBand {
+        let layout = RingLayout.make(root: (0..<count).map { .action(ActionNode(id: "n\($0)", title: "N", action: "log", params: .object([:]))) }, path: [])
+        return layout.bands[0]
     }
 
-    func testPaddingIsTakenOffBothSides() {
-        XCTAssertEqual(style.availableTextWidth(thickness: 64, tangential: 120, angle: 0, padding: 5), 110, accuracy: 1e-6)
+    private func arcBand(count: Int) -> RingBand {
+        let group = Node.group(GroupNode(id: "g", title: "G", icon: nil, children: (0..<count).map { .action(ActionNode(id: "c\($0)", title: "C", action: "log", params: .object([:]))) }))
+        let layout = RingLayout.make(root: [group, .action(ActionNode(id: "x", title: "X", action: "log", params: .object([:])))], path: ["g"])
+        return layout.bands[1]
     }
 
-    func testTheRoomIsNeverNegative() {
-        XCTAssertEqual(style.availableTextWidth(thickness: 4, tangential: 4, angle: 1, padding: 10), 0)
+    func testTheRoomIsAHalfBoxAroundTheIconPointAndLeavesTheCellPadding() {
+        let b = arcBand(count: 5)
+        let room = style.cellRoom(for: b, hasChevron: false)
+        XCTAssertLessThan(room.halfRadial, (b.outerRadius - b.innerRadius) / 2 - style.contentInset + 1e-9)
+        XCTAssertLessThan(room.halfTangential, b.itemWidth * b.iconRadius / 2 - style.contentInset + 1e-9)
+        XCTAssertGreaterThan(room.halfRadial, 0)
+        XCTAssertGreaterThan(room.halfTangential, 0)
     }
 
-    func testALabelThatFitsKeepsItsSize() {
-        XCTAssertEqual(style.fittedFontSize(textWidthAtBaseSize: 30, available: 60), style.labelBaseSize)
+    func testAGroupCellReservesTheChevronsSlotSoContentCannotCollideWithIt() {
+        let b = arcBand(count: 5)
+        let plain = style.cellRoom(for: b, hasChevron: false)
+        let group = style.cellRoom(for: b, hasChevron: true)
+        XCTAssertLessThan(group.halfRadial, plain.halfRadial)
+        XCTAssertEqual(group.halfTangential, plain.halfTangential, "only the radial extent is taken")
+        // The content's outer edge stays clear of the chevron's inner edge by at least the label padding.
+        let chevronInnerEdge = b.outerRadius - style.chevronInset - style.chevronSize / 2
+        XCTAssertLessThanOrEqual(b.iconRadius + group.halfRadial, chevronInnerEdge - style.labelPadding + 1e-9)
     }
 
-    func testALabelThatIsTooWideIsScaledToFit() {
-        let size = style.fittedFontSize(textWidthAtBaseSize: 60, available: 48)
-        XCTAssertEqual(size, style.labelBaseSize * 0.8, accuracy: 1e-9)
-        XCTAssertGreaterThan(size, style.labelMinSize)
+    func testTheRoomIsNeverNegativeEvenForATinyCell() {
+        let tiny = RingBand(level: 1, innerRadius: 100, outerRadius: 106, startAngle: 0, itemWidth: 0.02, count: 3, iconRadius: 103, iconSize: 12, isCrowded: true)
+        let room = style.cellRoom(for: tiny, hasChevron: true)
+        XCTAssertEqual(room.halfRadial, 0)
+        XCTAssertEqual(room.halfTangential, 0)
     }
 
-    func testALabelNeverShrinksBelowTheMinimumAndTheRestIsLeftToTruncation() {
-        XCTAssertEqual(style.fittedFontSize(textWidthAtBaseSize: 200, available: 20), style.labelMinSize)
-        XCTAssertEqual(style.fittedFontSize(textWidthAtBaseSize: 10, available: 0), style.labelMinSize)
+    func testABoxFitsWhenItsRotatedCornersStayInsideTheCell() {
+        let room = RingStyle.CellRoom(halfRadial: 20, halfTangential: 15)
+        // Straight up the cell's width is tangential and its height radial; at 3 o'clock they swap.
+        XCTAssertTrue(style.fits(width: 30, height: 40, angle: 0, in: room))
+        XCTAssertFalse(style.fits(width: 30.5, height: 40, angle: 0, in: room))
+        XCTAssertFalse(style.fits(width: 30, height: 40.5, angle: 0, in: room))
+        XCTAssertTrue(style.fits(width: 40, height: 30, angle: .pi / 2, in: room))
+        XCTAssertFalse(style.fits(width: 41, height: 30, angle: .pi / 2, in: room))
+        // Diagonal: the corner of an upright box sticks out of a rotated cell sooner than its sides would suggest.
+        XCTAssertFalse(style.fits(width: 30, height: 40, angle: .pi / 4, in: room))
     }
 
-    func testNonsenseMeasurementsFallBackToTheBaseSize() {
-        XCTAssertEqual(style.fittedFontSize(textWidthAtBaseSize: 0, available: 50), style.labelBaseSize)
-        XCTAssertEqual(style.fittedFontSize(textWidthAtBaseSize: .nan, available: 50), style.labelBaseSize)
+    func testTheWidestBoxOfAGivenHeight() {
+        let room = RingStyle.CellRoom(halfRadial: 20, halfTangential: 15)
+        XCTAssertEqual(style.maxWidth(forHeight: 14, angle: 0, in: room), 30, accuracy: 1e-9)
+        XCTAssertEqual(style.maxWidth(forHeight: 14, angle: .pi / 2, in: room), 40, accuracy: 1e-9)
+        XCTAssertEqual(style.maxWidth(forHeight: 50, angle: 0, in: room), 0, "too tall for the cell at all")
+        for angle in stride(from: 0.0, to: 2 * Double.pi, by: 0.17) {
+            let w = style.maxWidth(forHeight: 14, angle: angle, in: room)
+            XCTAssertTrue(style.fits(width: w, height: 14, angle: angle, in: room), "\(angle)")
+            XCTAssertFalse(style.fits(width: w + 0.5, height: 14, angle: angle, in: room), "\(angle) is the widest")
+        }
+    }
+
+    func testFitScaleIsTheLargestScaleThatStillFits() {
+        let room = RingStyle.CellRoom(halfRadial: 20, halfTangential: 15)
+        for angle in stride(from: 0.0, to: 2 * Double.pi, by: 0.23) {
+            let k = style.fitScale(width: 60, height: 20, angle: angle, in: room, scale: 1.1)
+            XCTAssertTrue(style.fits(width: 60 * k * 1.1, height: 20 * k * 1.1, angle: angle, in: room), "\(angle)")
+            XCTAssertFalse(style.fits(width: 60 * k * 1.1 * 1.01, height: 20 * k * 1.1 * 1.01, angle: angle, in: room), "\(angle): not smaller than needed")
+        }
+        XCTAssertEqual(style.fitScale(width: 0, height: 0, angle: 0, in: room, scale: 1), 1, "an empty box needs no shrinking")
+    }
+
+    func testALabelThatFitsKeepsTheBaseSize() {
+        let room = RingStyle.CellRoom(halfRadial: 25, halfTangential: 30)
+        let fit = style.labelFit(widthAtBaseSize: 20, heightAtBaseSize: 14, angle: 0, in: room, scale: 1)
+        XCTAssertEqual(fit?.fontSize, style.labelBaseSize)
+        XCTAssertEqual(fit?.maxWidth ?? 0, 20, accuracy: 1e-9)
+    }
+
+    func testALabelThatIsTooWideIsScaledDownToFit() throws {
+        let room = RingStyle.CellRoom(halfRadial: 25, halfTangential: 15)
+        let fit = try XCTUnwrap(style.labelFit(widthAtBaseSize: 36, heightAtBaseSize: 14, angle: 0, in: room, scale: 1))
+        XCTAssertEqual(fit.fontSize, style.labelBaseSize * 30 / 36, accuracy: 1e-9)
+        XCTAssertGreaterThanOrEqual(fit.fontSize, style.labelMinSize)
+    }
+
+    func testALabelNeverShrinksBelowTheMinimumAndTheRestIsTruncatedInsideTheBox() throws {
+        let room = RingStyle.CellRoom(halfRadial: 25, halfTangential: 15)
+        let fit = try XCTUnwrap(style.labelFit(widthAtBaseSize: 300, heightAtBaseSize: 14, angle: 0, in: room, scale: 1))
+        XCTAssertEqual(fit.fontSize, style.labelMinSize)
+        XCTAssertEqual(fit.maxWidth, 30, accuracy: 1e-9, "truncated to what the cell can take")
+    }
+
+    func testNoLabelIsDrawnWhenThereIsNoRoomForEvenOneLine() {
+        let room = RingStyle.CellRoom(halfRadial: 3, halfTangential: 3)
+        XCTAssertNil(style.labelFit(widthAtBaseSize: 30, heightAtBaseSize: 14, angle: 0, in: room, scale: 1))
+        XCTAssertNil(style.labelFit(widthAtBaseSize: 30, heightAtBaseSize: 14, angle: 0, in: .init(halfRadial: 0, halfTangential: 0), scale: 1))
+    }
+
+    func testNonsenseMeasurementsAreSafe() {
+        let room = RingStyle.CellRoom(halfRadial: 25, halfTangential: 30)
+        XCTAssertNil(style.labelFit(widthAtBaseSize: .nan, heightAtBaseSize: 14, angle: 0, in: room, scale: 1))
+        XCTAssertNil(style.labelFit(widthAtBaseSize: 0, heightAtBaseSize: 14, angle: 0, in: room, scale: 1))
+        XCTAssertNil(style.labelFit(widthAtBaseSize: 30, heightAtBaseSize: -1, angle: 0, in: room, scale: 1))
+    }
+
+    /// The property that matters: whatever the label, the angle, the band or the hover scale, what gets drawn (the text,
+    /// truncated to `maxWidth`, at the fitted size, scaled up for hover) is inside the cell's safe box.
+    func testFittedLabelsNeverLeaveTheSafeBoxInAnyCellAtAnyAngleAndScale() {
+        // Text widths at the base size for labels from 1 to 24 characters (about 7 pt per character, 15 pt tall).
+        let labelWidths = [1, 3, 4, 5, 8, 14, 24].map { Double($0) * 7 }
+        var bands = [rootBand(count: 3), rootBand(count: 6), rootBand(count: 12), rootBand(count: 20)]
+        for count in [1, 2, 3, 5, 8, 12] { bands.append(arcBand(count: count)) }
+        for b in bands {
+            for chevron in [false, true] {
+                let room = style.cellRoom(for: b, hasChevron: chevron)
+                for index in 0..<b.count {
+                    let angle = b.centerAngle(ofItem: index)
+                    for width in labelWidths {
+                        for scale in [1.0, style.hoverIconScale] {
+                            guard let fit = style.labelFit(widthAtBaseSize: width, heightAtBaseSize: 15, angle: angle, in: room, scale: scale) else { continue }
+                            XCTAssertLessThanOrEqual(fit.fontSize, style.labelBaseSize + 1e-9)
+                            XCTAssertGreaterThanOrEqual(fit.fontSize, style.labelMinSize - 1e-9)
+                            let drawnHeight = 15 * fit.fontSize / style.labelBaseSize * scale
+                            XCTAssertTrue(style.fits(width: fit.maxWidth * scale, height: drawnHeight, angle: angle, in: room),
+                                          "level \(b.level) count \(b.count) item \(index) chevron \(chevron) width \(width) scale \(scale)")
+                            XCTAssertLessThanOrEqual(fit.maxWidth, width * fit.fontSize / style.labelBaseSize + 1e-9, "never wider than the text itself")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testShortFormatNamesStayReadableInEveryCellOfEveryRealisticBand() {
+        // 3 to 4 letters ("PNG", "WebP"): about 28 pt wide at the base size. They must never be hidden or squeezed to nothing
+        // in a leaf cell of a band with the usual number of items.
+        for count in 3...12 {
+            let b = arcBand(count: count)
+            let room = style.cellRoom(for: b, hasChevron: false)
+            for index in 0..<b.count {
+                let fit = style.labelFit(widthAtBaseSize: 28, heightAtBaseSize: 15, angle: b.centerAngle(ofItem: index), in: room, scale: style.hoverIconScale)
+                XCTAssertNotNil(fit, "count \(count) item \(index)")
+                XCTAssertGreaterThanOrEqual(fit?.fontSize ?? 0, style.labelMinSize)
+            }
+        }
+    }
+
+    func testIconsShrinkToTheirSafeBoxToo() {
+        let b = arcBand(count: 6)
+        for chevron in [false, true] {
+            let room = style.cellRoom(for: b, hasChevron: chevron)
+            for index in 0..<b.count {
+                let angle = b.centerAngle(ofItem: index)
+                let k = min(1, style.fitScale(width: b.iconSize, height: b.iconSize, angle: angle, in: room, scale: style.hoverIconScale))
+                let drawn = b.iconSize * k * style.hoverIconScale
+                XCTAssertTrue(style.fits(width: drawn, height: drawn, angle: angle, in: room), "item \(index) chevron \(chevron)")
+            }
+        }
     }
 
     // MARK: Appearing
 
     func testTheRingAppearsFromJustBelowFullSize() {
-        XCTAssertGreaterThanOrEqual(style.appearScale, 0.9)
+        XCTAssertGreaterThanOrEqual(style.appearScale, 0.95)
         XCTAssertLessThan(style.appearScale, 1)
+        XCTAssertGreaterThanOrEqual(style.arcAppearScale, 0.95)
         XCTAssertLessThan(style.arcAppearScale, 1)
     }
 }

@@ -31,7 +31,8 @@ public struct RingMetrics: Equatable, Sendable {
     public var closeHysteresis: TimeInterval = 0.15
 
     // Drawing and placement
-    public var panelPadding = 4.0
+    /// Room around the outermost band: glass draws a little beyond its shape (rim, refraction) and must not be cut.
+    public var panelPadding = 12.0
     public var minIconSize = 12.0
     public var maxIconSize = 24.0
     /// Distance kept between an arc and the screen edge when shifting it on screen.

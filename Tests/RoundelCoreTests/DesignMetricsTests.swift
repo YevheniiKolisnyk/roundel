@@ -57,6 +57,16 @@ final class DesignMetricsTests: XCTestCase {
         if case .fade(let duration) = m.reducedMotionFade { XCTAssertLessThanOrEqual(duration, 0.2) } else { XCTFail("reduced motion is a fade") }
     }
 
+    func testTheRingAppearsWithAShortEaseOutWithoutOvershootAndSwitchesItsHighlightFast() {
+        guard case .easeOut(let appear) = m.ringAppearMotion else { return XCTFail("an ease-out, not a spring: nothing can overshoot") }
+        XCTAssertGreaterThanOrEqual(appear, 0.1)
+        XCTAssertLessThanOrEqual(appear, 0.2)
+        guard case .fade(let highlight) = m.ringHighlightMotion else { return XCTFail("a cross-fade, no morphing") }
+        XCTAssertLessThanOrEqual(highlight, 0.12)
+        XCTAssertEqual(m.resolve(m.ringAppearMotion, reduceMotion: true), m.reducedMotionFade)
+        XCTAssertEqual(m.resolve(m.ringAppearMotion, reduceMotion: false), m.ringAppearMotion)
+    }
+
     func testReduceMotionTurnsASpringIntoAShortFade() {
         XCTAssertEqual(m.resolve(m.appearMotion, reduceMotion: false), m.appearMotion)
         XCTAssertEqual(m.resolve(m.appearMotion, reduceMotion: true), m.reducedMotionFade)
