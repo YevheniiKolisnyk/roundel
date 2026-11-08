@@ -21,13 +21,16 @@ public final class ImageCompressor: ImageCompressing, Sendable {
     private let probe: any ImageProbing
     private let plan: ConcurrencyPlan
     private let fileExists: @Sendable (URL) -> Bool
+    private let pngOptimizer: @Sendable (Data, PNGOptimizer.Options) throws -> Data
 
     public init(encoder: any ImageEncoder, probe: any ImageProbing = ImageIOProbe(), plan: ConcurrencyPlan = .standard,
-                fileExists: @escaping @Sendable (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) {
+                fileExists: @escaping @Sendable (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) },
+                pngOptimizer: @escaping @Sendable (Data, PNGOptimizer.Options) throws -> Data = { try PNGOptimizer.optimize($0, options: $1) }) {
         self.encoder = encoder
         self.probe = probe
         self.plan = plan
         self.fileExists = fileExists
+        self.pngOptimizer = pngOptimizer
     }
 
     public func compress(files: [URL], options: CompressionOptions, progress: @escaping @Sendable (Int, Int) -> Void) async -> [CompressionItemResult] {
@@ -60,6 +63,11 @@ public final class ImageCompressor: ImageCompressing, Sendable {
         let slot = await placer.reserve(for: source, fileExtension: CompressionPlan.outputExtension(detectedType: type, source: source))
         do {
             try produce(decision, from: source, to: slot.temporary)
+        } catch is NothingToKeep {
+            // The optimizer's own safety net refused its result: the original stays, nothing is written, and the user is not
+            // bothered with an internal problem.
+            try? FileManager.default.removeItem(at: slot.temporary)
+            return .alreadyOptimal(source: source)
         } catch let skip as SkipRequest {
             try? FileManager.default.removeItem(at: slot.temporary)
             return .skipped(source: source, reason: skip.reason)
@@ -88,6 +96,7 @@ public final class ImageCompressor: ImageCompressing, Sendable {
     }
 
     private struct SkipRequest: Error { let reason: CompressionSkipReason }
+    private struct NothingToKeep: Error {}
 
     /// Writes the compressed version to `temporary`.
     private func produce(_ decision: CompressionDecision, from source: URL, to temporary: URL) throws {
@@ -97,7 +106,7 @@ public final class ImageCompressor: ImageCompressing, Sendable {
         case .optimizePNG(let options):
             let data = try Data(contentsOf: source)
             do {
-                try PNGOptimizer.optimize(data, options: options).write(to: temporary)
+                try pngOptimizer(data, options).write(to: temporary)
             } catch let error as PNGOptimizeError {
                 switch error {
                 case .interlaced: throw SkipRequest(reason: .interlacedPNG)
@@ -105,7 +114,7 @@ public final class ImageCompressor: ImageCompressing, Sendable {
                 case .damaged: throw ImageConversionError.damaged
                 case .notPNG: throw ImageConversionError.notAnImage
                 case .unsupported: throw SkipRequest(reason: .unsupported("this PNG"))
-                case .verificationFailed: throw ImageConversionError.encodeFailed(format: "PNG")
+                case .verificationFailed: throw NothingToKeep()
                 }
             }
         case .skip, .alreadyOptimal:

@@ -61,7 +61,23 @@ public enum PNGOptimizer {
     static let reductionSafeChunks: Set<String> = ["IHDR", "IDAT", "IEND", "pHYs", "tEXt", "zTXt", "iTXt", "eXIf", "tIME"]
     static let strippedChunks: Set<String> = ["tEXt", "zTXt", "iTXt", "tIME"]
 
+    /// The two steps that produce the output, replaceable so that tests can break them and watch the safety net
+    /// (`PNGVerifier`) catch it.
+    struct Steps {
+        /// The deflate stream of the filtered rows of a candidate.
+        var compress: ([UInt8], PNGHeader, SearchPlan) -> [UInt8]?
+        /// The finished file.
+        var assemble: (PNGFile, PNGCandidate, [UInt8], Options) -> Data
+
+        static let standard = Steps(compress: { PNGOptimizer.compress($0, header: $1, plan: $2) },
+                                    assemble: { PNGOptimizer.assemble(file: $0, chosen: $1, stream: $2, options: $3) })
+    }
+
     public static func optimize(_ data: Data, options: Options = Options()) throws -> Data {
+        try optimize(data, options: options, steps: .standard)
+    }
+
+    static func optimize(_ data: Data, options: Options, steps: Steps) throws -> Data {
         let file = try PNGFile.parse(data)
         if file.chunks.contains(where: { $0.type == "acTL" }) { throw PNGOptimizeError.animated }
         if file.header.interlace != 0 { throw PNGOptimizeError.interlaced }
@@ -85,18 +101,17 @@ public enum PNGOptimizer {
         var best: (candidate: PNGCandidate, stream: [UInt8], size: Int)?
         for candidate in candidates {
             let plan = searchPlan(effort: options.effort, rawBytes: candidate.pixels.count, sampleRatio: options.effort == .thorough && candidate.pixels.count > smallBytes ? sampleRatio(of: candidate) : 1)
-            guard let packed = compress(candidate.pixels, header: candidate.header, plan: plan) else { throw PNGOptimizeError.verificationFailed }
+            guard let packed = steps.compress(candidate.pixels, candidate.header, plan) else { throw PNGOptimizeError.verificationFailed }
             let size = packed.count + candidate.extraChunks.reduce(0) { $0 + $1.data.count + 12 }
             if best == nil || size < best!.size { best = (candidate, packed, size) }
         }
         guard let chosen = best else { throw PNGOptimizeError.verificationFailed }
 
-        // The safety net: what is about to be written must decode to the pixels that were read.
-        let h = chosen.candidate.header
-        guard let again = Zlib.inflate(chosen.stream, limit: h.height * (h.rowBytes + 1)),
-              PNGFilter.unfilter(again, rowBytes: h.rowBytes, height: h.height, step: h.filterStep) == chosen.candidate.pixels else { throw PNGOptimizeError.verificationFailed }
-
-        return assemble(file: file, chosen: chosen.candidate, stream: chosen.stream, options: options)
+        // The safety net: the finished file must be the file we were given, pixel for pixel and chunk for chunk (see PNGVerifier).
+        let written = steps.assemble(file, chosen.candidate, chosen.stream, options)
+        guard PNGVerifier.verify(source: file, sourceRaw: raw, result: written, stripMetadata: options.stripMetadata,
+                                 addedChunkTypes: Set(chosen.candidate.extraChunks.map(\.type))) else { throw PNGOptimizeError.verificationFailed }
+        return written
     }
 
     // MARK: Compression
@@ -161,7 +176,7 @@ public enum PNGOptimizer {
 
     // MARK: Writing the file
 
-    private static func assemble(file: PNGFile, chosen: PNGCandidate, stream: [UInt8], options: Options) -> Data {
+    static func assemble(file: PNGFile, chosen: PNGCandidate, stream: [UInt8], options: Options) -> Data {
         var out: [PNGChunk] = []
         var wroteImageData = false
         for chunk in file.chunks {
