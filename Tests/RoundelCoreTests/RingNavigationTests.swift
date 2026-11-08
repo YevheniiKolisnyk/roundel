@@ -501,3 +501,28 @@ final class RingNavigationTests: XCTestCase {
         XCTAssertEqual(nav.hotkeyUp(), .select("n150"))
     }
 }
+
+/// The ring is live from its very first frame: nothing in the logic waits for a visual to finish appearing.
+final class RingFirstFrameTests: XCTestCase {
+    private func action(_ id: String) -> Node { .action(ActionNode(id: id, title: id, action: "log")) }
+    private func group(_ id: String, _ children: [Node]) -> Node { .group(GroupNode(id: id, title: id, children: children)) }
+
+    func testReleasingTheHotkeyAtTheSameInstantTheRingOpensCommitsTheLeafUnderThePointer() {
+        let config = RoundelConfig(version: 1, settings: ConfigSettings(openMode: .holdRelease), ring: [action("a"), action("b"), group("g", [action("c")])])
+        var nav = RingInteraction()
+        XCTAssertEqual(nav.hotkeyDown(config: config), .opened)
+        // The same instant: no time has passed, so no animation could have run.
+        XCTAssertEqual(nav.update(hit: .item(level: 0, index: 1), now: 0), .none)
+        XCTAssertEqual(nav.hotkeyUp(), .select("b"))
+    }
+
+    func testHitTestingAndTheLayoutDoNotDependOnAnyViewState() {
+        // RingLayout.make and hit(dx:dy:) take nothing but nodes, metrics and the pointer; there is no animation input.
+        let nodes: [Node] = (0..<6).map { action("n\($0)") }
+        let layout = RingLayout.make(root: nodes, path: [])
+        let first = (0..<360).map { layout.hit(dx: 80 * sin(Double($0) * .pi / 180), dy: 80 * cos(Double($0) * .pi / 180)) }
+        let second = (0..<360).map { layout.hit(dx: 80 * sin(Double($0) * .pi / 180), dy: 80 * cos(Double($0) * .pi / 180)) }
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(layout.hit(dx: 0, dy: 80), .item(level: 0, index: 0))
+    }
+}

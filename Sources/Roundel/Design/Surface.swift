@@ -24,6 +24,8 @@ struct SurfaceInfo: DynamicProperty {
 /// are separate, complete looks; the Material one is the one macOS 14 and 15 show (and `ROUNDEL_SURFACE=material` forces).
 private struct SurfaceModifier<S: InsettableShape>: ViewModifier {
     let shape: S
+    /// Whether the material and solid looks cast a shadow (a ring's bands are close together and do not).
+    let casting: Bool
     private let info = SurfaceInfo()
     @Environment(\.colorScheme) private var scheme
     private let metrics = DesignMetrics.standard
@@ -55,14 +57,14 @@ private struct SurfaceModifier<S: InsettableShape>: ViewModifier {
         content
             .background { shape.fill(.regularMaterial) }
             .overlay { shape.strokeBorder(litEdge(traits), lineWidth: traits.borderWidth) }
-            .shadow(color: .black.opacity(metrics.shadowOpacity), radius: metrics.shadowRadius, x: 0, y: metrics.shadowYOffset)
+            .shadow(color: .black.opacity(casting ? metrics.shadowOpacity : 0), radius: metrics.shadowRadius, x: 0, y: metrics.shadowYOffset)
     }
 
     private func solid(_ content: Content, _ traits: SurfaceTraits) -> some View {
         content
             .background { shape.fill(Color(nsColor: .windowBackgroundColor)) }
             .overlay { shape.strokeBorder(Color.primary.opacity(traits.borderOpacity), lineWidth: traits.borderWidth) }
-            .shadow(color: .black.opacity(metrics.shadowOpacity), radius: metrics.shadowRadius, x: 0, y: metrics.shadowYOffset)
+            .shadow(color: .black.opacity(casting ? metrics.shadowOpacity : 0), radius: metrics.shadowRadius, x: 0, y: metrics.shadowYOffset)
     }
 
     /// A hairline that is lit from above: bright at the top edge, faint at the bottom.
@@ -74,7 +76,7 @@ private struct SurfaceModifier<S: InsettableShape>: ViewModifier {
 
 extension View {
     /// Draws this view on a surface in `shape`: glass, material or solid, as the system and the settings say.
-    func roundelSurface<S: InsettableShape>(in shape: S) -> some View {
-        modifier(SurfaceModifier(shape: shape))
+    func roundelSurface<S: InsettableShape>(in shape: S, casting: Bool = true) -> some View {
+        modifier(SurfaceModifier(shape: shape, casting: casting))
     }
 }

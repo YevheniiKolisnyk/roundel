@@ -19,6 +19,7 @@ final class RingCoordinator: RingDropDelegate {
     private var pendingConfig: RoundelConfig?
 
     private let metrics = RingMetrics.standard
+    private let design = DesignMetrics.standard
     private var layout = RingLayout.make(root: [], path: [])
     private var ringCenter = CGPoint.zero
     private var limits = ScreenLimits.fallback
@@ -119,7 +120,7 @@ final class RingCoordinator: RingDropDelegate {
         case .opened:
             open()
         case .layoutChanged:
-            withAnimation(.easeOut(duration: 0.12)) { rebuildLayout() }
+            withAnimation(layoutAnimation) { rebuildLayout() }
             // The layout under the pointer is new: tell the state machine what is there now.
             pollPointer()
         case .select(let id):
@@ -146,6 +147,8 @@ final class RingCoordinator: RingDropDelegate {
 
         rebuildLayout()
         panel.show(centeredOn: ringCenter, side: model.panelSide)
+        // The panel (with its click footprint) is up and live; only now do the visuals come in.
+        withAnimation(appearAnimation) { model.isPresented = true }
         pollPointer()
         startTracking()
         KeyboardShortcuts.enable(.dismissRing)
@@ -169,7 +172,9 @@ final class RingCoordinator: RingDropDelegate {
         // Drop the click footprint first, then stop the panel from taking mouse events, then take it off screen.
         model.footprint = []
         model.bands = []
-        model.highlighted = []
+        model.hovered = nil
+        model.openParents = []
+        model.isPresented = false
         panel.hide()
         if let pendingConfig { activate(pendingConfig) }
     }
@@ -194,11 +199,27 @@ final class RingCoordinator: RingDropDelegate {
             ).map { DisplayItem(item: $0, icon: iconStore.resolve($0)) }
             return BandModel(band: band, items: items, connector: connector(for: band))
         }
-        model.highlighted = Set(interaction.highlightedItems)
+        syncEmphasis()
         model.footprint = layout.footprint
         model.panelSide = metrics.panelSide(forOuterRadius: layout.outerRadius)
         if panel.isVisible { panel.resize(side: model.panelSide) }
     }
+
+    /// What is hovered and which groups are open, for the view.
+    private func syncEmphasis() {
+        var parents = Set<RingItemRef>()
+        for (level, id) in interaction.path.enumerated() {
+            if let index = interaction.nodes(atLevel: level).firstIndex(where: { $0.id == id }) {
+                parents.insert(RingItemRef(level: level, index: index))
+            }
+        }
+        if model.openParents != parents { model.openParents = parents }
+        if model.hovered != interaction.hovered { model.hovered = interaction.hovered }
+    }
+
+    private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    private var appearAnimation: Animation { design.resolve(design.appearMotion, reduceMotion: reduceMotion).animation }
+    private var layoutAnimation: Animation { design.resolve(design.appearMotion, reduceMotion: reduceMotion).animation }
 
     /// The short stub drawn between a parent section and its arc.
     private func connector(for band: RingBand) -> BandModel.Connector? {
@@ -262,11 +283,10 @@ final class RingCoordinator: RingDropDelegate {
             let offset = pointerOffset()
             let outcome = interaction.update(hit: layout.hit(dx: offset.dx, dy: offset.dy), now: now)
             guard outcome == .layoutChanged else { break }
-            withAnimation(.easeOut(duration: 0.12)) { rebuildLayout() }
+            withAnimation(layoutAnimation) { rebuildLayout() }
         }
 
-        let highlighted = Set(interaction.highlightedItems)
-        if model.highlighted != highlighted { model.highlighted = highlighted }
+        syncEmphasis()
 
         if interaction.isDragging { watchForDragEnd(now: now) }
     }

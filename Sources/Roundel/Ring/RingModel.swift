@@ -31,9 +31,14 @@ struct BandModel: Identifiable {
 @Observable
 final class RingModel {
     var bands: [BandModel] = []
-    /// The open chain plus the hovered item.
-    var highlighted: Set<RingItemRef> = []
+    /// The item under the pointer.
+    var hovered: RingItemRef?
+    /// The groups whose arcs are open.
+    var openParents: Set<RingItemRef> = []
     var panelSide = 0.0
     /// The area the ring owns on screen, gaps included (see `RingLayout.footprint`).
     var footprint: [RingFootprintRegion] = []
+    /// Whether the ring's visuals are shown (they appear with a short animation after the panel is up). Only paint:
+    /// the footprint and all hit-testing work from the first frame whatever this is.
+    var isPresented = false
 }
