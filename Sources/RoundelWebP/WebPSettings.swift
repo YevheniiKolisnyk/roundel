@@ -16,6 +16,8 @@ struct WebPSettings: Equatable {
     static func make(from options: ImageEncodingOptions) -> WebPSettings {
         let fallback = options.lossless ? 0.75 : 0.8
         let requested = options.quality.flatMap { $0.isFinite ? $0 : nil } ?? fallback
-        return WebPSettings(lossless: options.lossless, quality: Float(min(max(requested, 0), 1) * 100), method: 4)
+        // `thorough`: libwebp's slower methods (5 for lossy, 6 for lossless) give smaller files; 4 is its default.
+        let method = options.thorough ? (options.lossless ? 6 : 5) : 4
+        return WebPSettings(lossless: options.lossless, quality: Float(min(max(requested, 0), 1) * 100), method: method)
     }
 }

@@ -18,7 +18,7 @@ public struct WebPEncoder: ImageBackend {
     public func detectType(of url: URL) -> String? { nil }
 
     public func encode(source: URL, to destination: URL, format: ImageFormat, options: ImageEncodingOptions) throws -> EncodeOutcome {
-        let loaded = try ImageIOSource.load(source, upright: true)
+        let loaded = try ImageIOSource.load(source, upright: true, maxPixelSize: options.maxDimension)
         let image = loaded.image
         guard image.width <= WebPSettings.maxDimension, image.height <= WebPSettings.maxDimension else {
             throw ImageConversionError.tooLarge(format: format.displayName, limit: WebPSettings.maxDimension)
@@ -28,12 +28,12 @@ public struct WebPEncoder: ImageBackend {
         let rgba = try Self.straightRGBA(of: image, profile: &profile)
         let settings = WebPSettings.make(from: options)
         let bitstream = try WebPLibrary.encode(rgba: rgba, width: image.width, height: image.height, settings: settings)
-        let file = try WebPLibrary.assemble(bitstream: bitstream, icc: profile, exif: ImageIOSource.exifBlob(from: loaded.properties, pixelSize: (image.width, image.height)))
+        let file = try WebPLibrary.assemble(bitstream: bitstream, icc: profile, exif: options.stripMetadata ? nil : ImageIOSource.exifBlob(from: loaded.properties, pixelSize: (image.width, image.height)))
         try file.write(to: destination)
 
         var notes: [ConversionNote] = []
         if loaded.isAnimated { notes.append(.firstFrameOnly) }
-        let lost = ImageIOSource.droppedMetadata(properties: loaded.properties, image: image)
+        let lost = options.stripMetadata ? [] : ImageIOSource.droppedMetadata(properties: loaded.properties, image: image)
         if !lost.isEmpty { notes.append(.metadataNotKept(lost)) }
         return EncodeOutcome(notes: notes)
     }

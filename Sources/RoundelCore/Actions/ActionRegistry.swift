@@ -103,6 +103,7 @@ public struct ActionRegistry: Sendable {
             SwapLayoutAction(text: s.selectedText, inputSources: s.inputSources),
             FileOpenWithAction(workspace: s.workspace),
             ImageConvertAction(converter: s.imageConverter, capabilities: s.imageCapabilities),
+            ImageCompressAction(compressor: s.imageCompressor),
         ])
     }
 }

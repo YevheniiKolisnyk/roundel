@@ -13,46 +13,31 @@ public protocol ImageConverting: Sendable {
 /// Originals are never modified or deleted.
 public final class ImageConverter: ImageConverting, Sendable {
     private let encoder: any ImageEncoder
-    private let maxConcurrent: Int
+    private let plan: ConcurrencyPlan
+    private let probe: any ImageProbing
     private let fileExists: @Sendable (URL) -> Bool
 
-    public init(encoder: any ImageEncoder, maxConcurrent: Int = 3,
+    public init(encoder: any ImageEncoder, maxConcurrent: Int = ConcurrencyPlan.standard.maxConcurrent,
+                pixelBudget: Int = ConcurrencyPlan.standard.pixelBudget, probe: any ImageProbing = ImageIOProbe(),
                 fileExists: @escaping @Sendable (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) {
         self.encoder = encoder
-        self.maxConcurrent = max(1, maxConcurrent)
+        self.plan = ConcurrencyPlan(maxConcurrent: maxConcurrent, pixelBudget: pixelBudget)
+        self.probe = probe
         self.fileExists = fileExists
     }
 
     public func convert(files: [URL], to format: ImageFormat, options: ImageEncodingOptions, progress: @escaping @Sendable (Int, Int) -> Void) async -> [ConversionItemResult] {
-        let total = files.count
-        guard total > 0 else { return [] }
-
-        let names = NameReservations(fileExists: fileExists)
-        var results = [ConversionItemResult?](repeating: nil, count: total)
-        var done = 0
-
-        await withTaskGroup(of: (Int, ConversionItemResult).self) { group in
-            var next = 0
-            func startNext() {
-                guard next < total else { return }
-                let index = next
-                next += 1
-                group.addTask { (index, await self.convertOne(files[index], to: format, options: options, names: names)) }
-            }
-            for _ in 0..<min(maxConcurrent, total) { startNext() }
-            while let (index, result) = await group.next() {
-                results[index] = result
-                done += 1
-                progress(done, total)
-                startNext()
-            }
-        }
+        let placer = OutputPlacer(fileExists: fileExists)
+        let probe = self.probe
+        let results = await BatchRunner.run(count: files.count, plan: plan, weight: { probe.pixelCount(of: files[$0]) }, work: { index in
+            await self.convertOne(files[index], to: format, options: options, placer: placer)
+        }, progress: progress)
         return results.enumerated().map { $0.element ?? .failed(source: files[$0.offset], message: "cancelled") }
     }
 
     // MARK: One file
 
-    private func convertOne(_ source: URL, to format: ImageFormat, options: ImageEncodingOptions, names: NameReservations) async -> ConversionItemResult {
+    private func convertOne(_ source: URL, to format: ImageFormat, options: ImageEncodingOptions, placer: OutputPlacer) async -> ConversionItemResult {
         if Task.isCancelled { return .failed(source: source, message: "cancelled") }
         guard FileManager.default.fileExists(atPath: source.path) else { return .failed(source: source, message: "file not found") }
         guard FileManager.default.isReadableFile(atPath: source.path) else { return .failed(source: source, message: FailureText.cannotRead) }
@@ -64,9 +49,8 @@ public final class ImageConverter: ImageConverting, Sendable {
             return .failed(source: source, message: FailureText.cannotWriteHere)
         }
 
-        let first = await names.reserve(for: source, fileExtension: format.fileExtension)
-        let temporary = first.deletingLastPathComponent()
-            .appendingPathComponent(".\(first.lastPathComponent).roundel-\(UUID().uuidString.prefix(8)).tmp")
+        let slot = await placer.reserve(for: source, fileExtension: format.fileExtension)
+        let temporary = slot.temporary
 
         let outcome: EncodeOutcome
         do {
@@ -84,37 +68,10 @@ public final class ImageConverter: ImageConverting, Sendable {
         }
 
         // Move into place. If the name was taken in the meantime, move on to the next free one: a file is never replaced.
-        var destination = first
-        for _ in 0..<50 {
-            do {
-                try FileManager.default.moveItem(at: temporary, to: destination)
-                return .converted(source: source, output: destination, notes: outcome.notes)
-            } catch {
-                guard FileManager.default.fileExists(atPath: destination.path) else {
-                    try? FileManager.default.removeItem(at: temporary)
-                    return .failed(source: source, message: FailureText.describe(error))
-                }
-                destination = await names.reserve(for: source, fileExtension: format.fileExtension)
-            }
+        switch await placer.moveIntoPlace(slot, source: source, fileExtension: format.fileExtension) {
+        case .success(let destination): return .converted(source: source, output: destination, notes: outcome.notes)
+        case .failure(let failure): return .failed(source: source, message: failure.message)
         }
-        try? FileManager.default.removeItem(at: temporary)
-        return .failed(source: source, message: "no free file name")
     }
 
-}
-
-/// Hands out output names one at a time, so files converted in parallel never pick the same one.
-private actor NameReservations {
-    private let fileExists: @Sendable (URL) -> Bool
-    private var reserved: Set<URL> = []
-
-    init(fileExists: @escaping @Sendable (URL) -> Bool) {
-        self.fileExists = fileExists
-    }
-
-    func reserve(for source: URL, fileExtension: String) -> URL {
-        let url = OutputNaming.destination(for: source, fileExtension: fileExtension, exists: fileExists, reserved: reserved)
-        reserved.insert(url)
-        return url
-    }
 }

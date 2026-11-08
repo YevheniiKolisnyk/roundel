@@ -110,7 +110,7 @@ final class ActionRegistryTests: XCTestCase {
             "caffeinate.toggle", "screen.lock", "appearance.toggle", "dnd.toggle",
             "media.playPause", "media.next", "media.previous", "volume.muteToggle",
             "text.case", "text.pastePlain", "text.swapLayout",
-            "file.openWith", "image.convert",
+            "file.openWith", "image.convert", "image.compress",
         ])
         XCTAssertTrue(registry.duplicateIDs.isEmpty)
         XCTAssertEqual(registry.ids.count, Set(registry.ids).count)

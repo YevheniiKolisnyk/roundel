@@ -42,4 +42,11 @@ final class WebPSettingsTests: XCTestCase {
     func testTheLargestSideWebpAllows() {
         XCTAssertEqual(WebPSettings.maxDimension, 16383)
     }
+
+    func testThoroughMeansSlowerMethodsAndDefaultsStayAt4() {
+        XCTAssertEqual(WebPSettings.make(from: ImageEncodingOptions(quality: 0.7)).method, 4)
+        XCTAssertEqual(WebPSettings.make(from: ImageEncodingOptions(quality: 0.7, thorough: true)).method, 5)
+        XCTAssertEqual(WebPSettings.make(from: ImageEncodingOptions(quality: 1, lossless: true, thorough: true)).method, 6)
+        XCTAssertEqual(WebPSettings.make(from: ImageEncodingOptions(quality: 1, lossless: true)).method, 4)
+    }
 }

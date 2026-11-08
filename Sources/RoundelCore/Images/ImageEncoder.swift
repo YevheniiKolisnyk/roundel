@@ -24,10 +24,19 @@ public struct ImageEncodingOptions: Equatable, Sendable {
     public var quality: Double?
     /// Lossless output, for formats that have such a mode (WebP).
     public var lossless: Bool
+    /// Shrink the picture so that its longer side is at most this many pixels (never enlarge).
+    public var maxDimension: Int?
+    /// Leave out EXIF, GPS, IPTC and the like; the orientation and the color profile always stay.
+    public var stripMetadata: Bool
+    /// Spend more time for a smaller file (the encoder's slower, better settings).
+    public var thorough: Bool
 
-    public init(quality: Double? = nil, lossless: Bool = false) {
+    public init(quality: Double? = nil, lossless: Bool = false, maxDimension: Int? = nil, stripMetadata: Bool = false, thorough: Bool = false) {
         self.quality = quality
         self.lossless = lossless
+        self.maxDimension = maxDimension
+        self.stripMetadata = stripMetadata
+        self.thorough = thorough
     }
 }
 

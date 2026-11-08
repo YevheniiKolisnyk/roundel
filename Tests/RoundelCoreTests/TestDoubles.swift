@@ -149,6 +149,7 @@ struct Fakes {
     let media = FakeMedia()
     let selectedText = FakeSelectedText()
     let imageConverter = FakeImageConverter()
+    let imageCompressor = FakeImageCompressor()
     let imageCapabilities = FakeImageCapabilities()
     let inputSources = FakeInputSources()
     let logger = FakeLogger()
@@ -156,7 +157,7 @@ struct Fakes {
     var services: ActionServices {
         ActionServices(workspace: workspace, process: process, power: power, screenLocker: screenLocker,
                        appearance: appearance, mute: mute, media: media, selectedText: selectedText,
-                       inputSources: inputSources, imageConverter: imageConverter,
+                       inputSources: inputSources, imageConverter: imageConverter, imageCompressor: imageCompressor,
                        imageCapabilities: imageCapabilities, logger: logger)
     }
 }

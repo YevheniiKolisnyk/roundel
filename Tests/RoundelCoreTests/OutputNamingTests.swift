@@ -67,4 +67,19 @@ final class OutputNamingTests: XCTestCase {
         let existing = Set((["a.jpg"] + (2...50).map { "a \($0).jpg" }))
         XCTAssertEqual(name("a.png", "jpg", existing: existing), "a 51.jpg")
     }
+
+    // MARK: A suffix (compressed copies)
+
+    func testASuffixGoesBetweenTheNameAndTheExtensionAndCollisionsNumberAfterIt() {
+        let source = URL(fileURLWithPath: "/tmp/photo.jpg")
+        XCTAssertEqual(OutputNaming.destination(for: source, suffix: " compressed", fileExtension: "jpg", exists: { _ in false }).lastPathComponent, "photo compressed.jpg")
+        let taken: Set<String> = ["/tmp/photo compressed.jpg", "/tmp/photo compressed 2.jpg"]
+        XCTAssertEqual(OutputNaming.destination(for: source, suffix: " compressed", fileExtension: "jpg", exists: { taken.contains($0.path) }).lastPathComponent, "photo compressed 3.jpg")
+    }
+
+    func testTheSourceItselfIsNeverTheDestinationEvenWithoutASuffixCollision() {
+        // A compressed copy of "a compressed.png" is "a compressed compressed.png": never the same file.
+        let source = URL(fileURLWithPath: "/tmp/a compressed.png")
+        XCTAssertEqual(OutputNaming.destination(for: source, suffix: " compressed", fileExtension: "png", exists: { _ in false }).lastPathComponent, "a compressed compressed.png")
+    }
 }

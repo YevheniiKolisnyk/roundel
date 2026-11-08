@@ -14,8 +14,10 @@ let package = Package(
         .package(url: "https://github.com/SDWebImage/libwebp-Xcode", .upToNextMinor(from: "1.6.0")),
     ],
     targets: [
+        // The system's zlib (ships with macOS), for the PNG optimizer. A system library, not third-party code.
+        .systemLibrary(name: "CZlib", path: "Sources/CZlib"),
         // Pure logic (geometry, interaction state machine, models). No AppKit.
-        .target(name: "RoundelCore"),
+        .target(name: "RoundelCore", dependencies: ["CZlib"]),
         // The libwebp-based ImageEncoder. Kept apart so RoundelCore stays free of third-party code.
         .target(
             name: "RoundelWebP",

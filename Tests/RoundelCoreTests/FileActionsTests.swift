@@ -286,3 +286,18 @@ final class FakeImageConverter: ImageConverting, @unchecked Sendable {
         return results
     }
 }
+
+final class FakeImageCompressor: ImageCompressing, @unchecked Sendable {
+    struct Call { let files: [URL]; let options: CompressionOptions }
+    private let lock = NSLock()
+    private var _calls: [Call] = []
+    var results: [CompressionItemResult] = []
+    var progressSteps: [(Int, Int)] = []
+    var calls: [Call] { lock.withLock { _calls } }
+
+    func compress(files: [URL], options: CompressionOptions, progress: @escaping @Sendable (Int, Int) -> Void) async -> [CompressionItemResult] {
+        lock.withLock { _calls.append(Call(files: files, options: options)) }
+        for (done, total) in progressSteps { progress(done, total) }
+        return results
+    }
+}

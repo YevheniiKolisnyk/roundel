@@ -18,7 +18,9 @@ public struct SourceImage {
 /// libwebp is used only to write, never to decode.
 public enum ImageIOSource {
     /// - Parameter upright: apply the EXIF orientation to the pixels and set the orientation tag to 1.
-    public static func load(_ url: URL, upright: Bool) throws -> SourceImage {
+    /// - Parameter maxPixelSize: shrink the picture (never enlarge it) so that its longer side is at most this; the
+    ///   orientation is applied while doing so.
+    public static func load(_ url: URL, upright: Bool, maxPixelSize: Int? = nil) throws -> SourceImage {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(source) as String? else {
             throw ImageConversionError.unreadable
         }
@@ -31,6 +33,22 @@ public enum ImageIOSource {
         var properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] ?? [:]
 
         let orientation = (properties[kCGImagePropertyOrientation] as? Int) ?? 1
+        if let limit = maxPixelSize, limit > 0, max(image.width, image.height) > limit {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: limit,
+            ]
+            if let smaller = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary) {
+                image = smaller
+                properties[kCGImagePropertyOrientation] = 1   // applied to the pixels by the transform
+                if var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+                    tiff[kCGImagePropertyTIFFOrientation] = 1
+                    properties[kCGImagePropertyTIFFDictionary] = tiff
+                }
+                return SourceImage(image: image, properties: properties, detectedType: type, isAnimated: isAnimated(type: type, frames: CGImageSourceGetCount(source)))
+            }
+        }
         if upright, orientation != 1 {
             if let rotated = uprightImage(from: source, index: index, like: image) { image = rotated }
             properties[kCGImagePropertyOrientation] = 1

@@ -22,9 +22,9 @@ public struct ImageIOEncoder: ImageBackend {
 
     public func encode(source url: URL, to destination: URL, format: ImageFormat, options: ImageEncodingOptions) throws -> EncodeOutcome {
         // A format that cannot store the orientation tag gets the rotation applied to the pixels instead.
-        let loaded = try ImageIOSource.load(url, upright: !format.storesOrientation)
+        let loaded = try ImageIOSource.load(url, upright: !format.storesOrientation, maxPixelSize: options.maxDimension)
         var image = loaded.image
-        var settings = Self.metadata(from: loaded.properties)
+        var settings = Self.metadata(from: loaded.properties, stripping: options.stripMetadata)
 
         if !format.supportsAlpha, Self.hasAlpha(image) {
             guard let flat = Self.flattenedOnWhite(image) else { throw ImageConversionError.encodeFailed(format: format.displayName) }
@@ -46,9 +46,11 @@ public struct ImageIOEncoder: ImageBackend {
 
     /// The parts of the source's properties worth carrying over: EXIF, TIFF, GPS, IPTC, orientation and resolution.
     /// Format-specific blocks (JFIF, PNG, GIF, HEIC) are left out; the color profile travels with the image itself.
-    static func metadata(from properties: [CFString: Any]) -> [CFString: Any] {
-        let keys: [CFString] = [kCGImagePropertyExifDictionary, kCGImagePropertyTIFFDictionary, kCGImagePropertyGPSDictionary,
-                                kCGImagePropertyIPTCDictionary, kCGImagePropertyOrientation, kCGImagePropertyDPIWidth, kCGImagePropertyDPIHeight]
+    /// With `stripping`, only what changes how the picture looks or prints stays: orientation and resolution.
+    static func metadata(from properties: [CFString: Any], stripping: Bool = false) -> [CFString: Any] {
+        let always: [CFString] = [kCGImagePropertyOrientation, kCGImagePropertyDPIWidth, kCGImagePropertyDPIHeight]
+        let keys: [CFString] = stripping ? always : [kCGImagePropertyExifDictionary, kCGImagePropertyTIFFDictionary, kCGImagePropertyGPSDictionary,
+                                                    kCGImagePropertyIPTCDictionary] + always
         return keys.reduce(into: [:]) { result, key in
             if let value = properties[key] { result[key] = value }
         }

@@ -21,6 +21,7 @@ public struct NodeGeneratorRegistry: Sendable {
     public static func standard(services s: ActionServices) -> NodeGeneratorRegistry {
         NodeGeneratorRegistry([
             ImageConvertFormatsGenerator(capabilities: s.imageCapabilities),
+            ImageCompressPresetsGenerator(),
         ])
     }
 }

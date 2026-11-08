@@ -132,13 +132,14 @@ public struct ActionServices: Sendable {
     public var selectedText: any SelectedTextServing
     public var inputSources: any InputSourceSwitching
     public var imageConverter: any ImageConverting
+    public var imageCompressor: any ImageCompressing
     public var imageCapabilities: any ImageCapabilities
     public var logger: any ActionLogging
 
     public init(workspace: any WorkspaceOpening, process: any ProcessRunning, power: any PowerAssertionHolding,
                 screenLocker: any ScreenLocking, appearance: any AppearanceReading, mute: any MuteControlling,
                 media: any MediaKeySending, selectedText: any SelectedTextServing, inputSources: any InputSourceSwitching,
-                imageConverter: any ImageConverting, imageCapabilities: any ImageCapabilities, logger: any ActionLogging) {
+                imageConverter: any ImageConverting, imageCompressor: any ImageCompressing, imageCapabilities: any ImageCapabilities, logger: any ActionLogging) {
         self.workspace = workspace
         self.process = process
         self.power = power
@@ -149,6 +150,7 @@ public struct ActionServices: Sendable {
         self.selectedText = selectedText
         self.inputSources = inputSources
         self.imageConverter = imageConverter
+        self.imageCompressor = imageCompressor
         self.imageCapabilities = imageCapabilities
         self.logger = logger
     }

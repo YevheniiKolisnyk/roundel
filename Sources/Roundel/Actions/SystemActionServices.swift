@@ -38,6 +38,7 @@ extension ActionServices {
             ),
             inputSources: SystemInputSources(),
             imageConverter: ImageConverter(encoder: imageBackends),
+            imageCompressor: ImageCompressor(encoder: imageBackends),
             imageCapabilities: imageBackends,
             logger: SystemActionLogger()
         )
