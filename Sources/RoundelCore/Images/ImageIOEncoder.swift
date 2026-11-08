@@ -6,10 +6,21 @@ import ImageIO
 public struct ImageIOEncoder: ImageBackend {
     public let name = "ImageIO"
     private let capabilities: any ImageCapabilities
+    private let pngOptimizer: (@Sendable (Data) throws -> Data)?
 
-    /// - Parameter capabilities: what to report as writable; the system's own list by default.
-    public init(capabilities: any ImageCapabilities = SystemImageCapabilities()) {
+    /// - Parameters:
+    ///   - capabilities: what to report as writable; the system's own list by default.
+    ///   - pngOptimizer: runs on every PNG this backend writes, because ImageIO's PNG writer makes files much bigger than
+    ///     they need to be (a screenshot twice the size, an icon too). The result replaces the file only if it is smaller;
+    ///     if the optimizer fails, ImageIO's own file stays. `nil` leaves PNGs as ImageIO wrote them.
+    public init(capabilities: any ImageCapabilities = SystemImageCapabilities(), pngOptimizer: (@Sendable (Data) throws -> Data)? = ImageIOEncoder.optimizePNG) {
         self.capabilities = capabilities
+        self.pngOptimizer = pngOptimizer
+    }
+
+    /// The lossless optimizer at full effort; it limits its own search by the size of the picture.
+    public static let optimizePNG: @Sendable (Data) throws -> Data = { data in
+        try PNGOptimizer.optimize(data, options: PNGOptimizer.Options(effort: .thorough))
     }
 
     public var writableTypeIdentifiers: [String] { capabilities.writableTypeIdentifiers }
@@ -38,11 +49,18 @@ public struct ImageIOEncoder: ImageBackend {
         }
         CGImageDestinationAddImage(sink, image, settings as CFDictionary)
         guard CGImageDestinationFinalize(sink) else { throw ImageConversionError.encodeFailed(format: format.displayName) }
+        if format.key == "png", let pngOptimizer { Self.replaceIfSmaller(destination, using: pngOptimizer) }
 
         return EncodeOutcome(notes: loaded.isAnimated ? [.firstFrameOnly] : [])
     }
 
     // MARK: Helpers
+
+    /// Runs `optimizer` on the file at `url` and swaps in the result when it is smaller. Any failure leaves the file alone.
+    private static func replaceIfSmaller(_ url: URL, using optimizer: @Sendable (Data) throws -> Data) {
+        guard let original = try? Data(contentsOf: url), let better = try? optimizer(original), better.count < original.count, !better.isEmpty else { return }
+        try? better.write(to: url, options: .atomic)
+    }
 
     /// The parts of the source's properties worth carrying over: EXIF, TIFF, GPS, IPTC, orientation and resolution.
     /// Format-specific blocks (JFIF, PNG, GIF, HEIC) are left out; the color profile travels with the image itself.
