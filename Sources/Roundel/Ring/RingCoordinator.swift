@@ -213,12 +213,10 @@ final class RingCoordinator: RingDropDelegate {
     // MARK: Running actions
 
     private func run(actionWithID id: String, files: [URL] = []) {
-        guard case .action(let action)? = activeConfig.node(withID: id) else {
-            Log.warning("Selected '\(id)' but it is not an action node")
-            return
-        }
-        // The ring is already closing; the action runs on its own so a slow one never holds the UI.
-        Task { await executor.execute(action, files: files) }
+        // The ring is already closing; the action runs on its own so a slow one never holds the UI. The executor looks
+        // the node up and tells the user if there is none, instead of the selection silently doing nothing.
+        let config = activeConfig
+        Task { await executor.execute(nodeWithID: id, in: config, files: files) }
     }
 
     // MARK: Pointer tracking

@@ -120,6 +120,12 @@ final class ConversionSummaryTests: XCTestCase {
         XCTAssertEqual(s.message, "Converted photo.png → photo.jpg")
     }
 
+    func testABlankFailureMessageIsNeverShownAsNothing() {
+        let s = summary([converted("ok"), .failed(source: url("bad.png"), message: "  ")])
+        XCTAssertTrue(s.message.contains("bad.png (unknown error)"), s.message)
+        XCTAssertEqual(summary([.failed(source: url("bad.png"), message: "")]).failureText, "Couldn’t convert bad.png (unknown error)")
+    }
+
     func testProgressText() {
         XCTAssertEqual(ConversionSummary.progressMessage(done: 4, total: 10), "Converting 4/10")
         XCTAssertEqual(ConversionSummary.progressMessage(done: 0, total: 10), "Converting 0/10")

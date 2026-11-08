@@ -178,3 +178,39 @@ final class FileInputTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(Icon.self, from: Data(#"{"text": "A", "symbol": "star"}"#.utf8)))
     }
 }
+
+/// Choosing a node by id when the ring commits: an id that is not an action must be said out loud, not only logged.
+@MainActor
+final class ExecuteByIDTests: XCTestCase {
+    private let reporter = FakeReporter()
+
+    private func executor() -> ActionExecutor {
+        ActionExecutor(registry: ActionRegistry([StubAction()]), permissions: FakePermissions(), reporter: reporter)
+    }
+
+    private let config = RoundelConfig(ring: [
+        .action(ActionNode(id: "run", title: "Run me", action: "stub.action")),
+        .group(GroupNode(id: "folder", title: "A folder", children: [.action(ActionNode(id: "inner", title: "Inner", action: "stub.action"))])),
+    ])
+
+    func testAnActionIdRunsTheAction() async {
+        await executor().execute(nodeWithID: "inner", in: config)
+        XCTAssertTrue(reporter.toasts.isEmpty)
+        XCTAssertTrue(reporter.infos.contains { $0.contains("inner") }, "\(reporter.infos)")
+    }
+
+    func testAnIdThatIsNotInTheConfigIsToastedAsAnError() async {
+        await executor().execute(nodeWithID: "ghost", in: config)
+        XCTAssertEqual(reporter.toasts.count, 1)
+        XCTAssertTrue(reporter.toasts[0].isError)
+        XCTAssertTrue(reporter.toasts[0].message.contains("ghost"), reporter.toasts[0].message)
+        XCTAssertFalse(reporter.warnings.isEmpty, "and it is logged too")
+    }
+
+    func testAGroupIdIsToastedAsAnError() async {
+        await executor().execute(nodeWithID: "folder", in: config)
+        XCTAssertEqual(reporter.toasts.count, 1)
+        XCTAssertTrue(reporter.toasts[0].isError)
+        XCTAssertTrue(reporter.toasts[0].message.contains("A folder"), reporter.toasts[0].message)
+    }
+}

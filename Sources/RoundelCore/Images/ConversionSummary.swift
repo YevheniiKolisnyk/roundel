@@ -70,7 +70,11 @@ public struct ConversionSummary: Equatable, Sendable {
     // MARK: Private
 
     private var failedItems: [(name: String, message: String)] {
-        results.compactMap { if case .failed(let source, let message) = $0 { (source.lastPathComponent, message) } else { nil } }
+        results.compactMap { result -> (name: String, message: String)? in
+            guard case .failed(let source, let message) = result else { return nil }
+            let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (source.lastPathComponent, text.isEmpty ? "unknown error" : text)
+        }
     }
 
     private var failureList: String {

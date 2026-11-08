@@ -34,5 +34,7 @@ let package = Package(
         ),
         .testTarget(name: "RoundelCoreTests", dependencies: ["RoundelCore"]),
         .testTarget(name: "RoundelWebPTests", dependencies: ["RoundelWebP", "RoundelCore"]),
+        // The app's own AppKit/SwiftUI pieces that can be checked without showing anything (sizes, positions).
+        .testTarget(name: "RoundelTests", dependencies: ["Roundel"]),
     ]
 )

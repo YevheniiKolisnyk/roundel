@@ -55,8 +55,14 @@ public final class ImageConverter: ImageConverting, Sendable {
     private func convertOne(_ source: URL, to format: ImageFormat, options: ImageEncodingOptions, names: NameReservations) async -> ConversionItemResult {
         if Task.isCancelled { return .failed(source: source, message: "cancelled") }
         guard FileManager.default.fileExists(atPath: source.path) else { return .failed(source: source, message: "file not found") }
+        guard FileManager.default.isReadableFile(atPath: source.path) else { return .failed(source: source, message: FailureText.cannotRead) }
         guard let type = encoder.detectType(of: source) else { return .failed(source: source, message: ImageConversionError.notAnImage.message) }
         if ImageFormats.isSame(detectedType: type, as: format) { return .skipped(source: source, reason: .alreadyInFormat) }
+        // The output goes next to the source, so that folder must accept new files. Said up front, in plain words,
+        // instead of as whatever the encoder makes of a failed write.
+        guard FileManager.default.isWritableFile(atPath: source.deletingLastPathComponent().path) else {
+            return .failed(source: source, message: FailureText.cannotWriteHere)
+        }
 
         let first = await names.reserve(for: source, fileExtension: format.fileExtension)
         let temporary = first.deletingLastPathComponent()
@@ -67,7 +73,14 @@ public final class ImageConverter: ImageConverting, Sendable {
             outcome = try encoder.encode(source: source, to: temporary, format: format, options: options)
         } catch {
             try? FileManager.default.removeItem(at: temporary)
-            return .failed(source: source, message: Self.message(for: error))
+            return .failed(source: source, message: FailureText.describe(error))
+        }
+
+        // An encoder that says "done" must have left something behind; an empty or missing file is a failure, not a result.
+        let written = (try? FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.intValue ?? 0
+        guard written > 0 else {
+            try? FileManager.default.removeItem(at: temporary)
+            return .failed(source: source, message: ImageConversionError.noOutput(format: format.displayName).message)
         }
 
         // Move into place. If the name was taken in the meantime, move on to the next free one: a file is never replaced.
@@ -79,7 +92,7 @@ public final class ImageConverter: ImageConverting, Sendable {
             } catch {
                 guard FileManager.default.fileExists(atPath: destination.path) else {
                     try? FileManager.default.removeItem(at: temporary)
-                    return .failed(source: source, message: Self.message(for: error))
+                    return .failed(source: source, message: FailureText.describe(error))
                 }
                 destination = await names.reserve(for: source, fileExtension: format.fileExtension)
             }
@@ -88,9 +101,6 @@ public final class ImageConverter: ImageConverting, Sendable {
         return .failed(source: source, message: "no free file name")
     }
 
-    private static func message(for error: Error) -> String {
-        (error as? ImageConversionError)?.message ?? error.localizedDescription
-    }
 }
 
 /// Hands out output names one at a time, so files converted in parallel never pick the same one.

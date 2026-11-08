@@ -14,6 +14,7 @@ final class ImageConverterTests: XCTestCase {
     }
 
     override func tearDown() {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
         try? FileManager.default.removeItem(at: dir)
     }
 
@@ -363,6 +364,101 @@ final class ImageConverterTests: XCTestCase {
         guard case .failed(_, let message)? = results.first else { return XCTFail("\(results)") }
         XCTAssertEqual(message, "the system couldn’t write JPEG")
         XCTAssertEqual(try files(), ["a.png"])
+    }
+
+    // MARK: Failures must be visible and leave nothing behind
+
+    private struct SilentEncoder: ImageEncoder {
+        func detectType(of url: URL) -> String? { "public.png" }
+        func encode(source: URL, to destination: URL, format: ImageFormat, options: ImageEncodingOptions) throws -> EncodeOutcome { EncodeOutcome() }   // "succeeds", writes nothing
+    }
+
+    private struct EmptyFileEncoder: ImageEncoder {
+        func detectType(of url: URL) -> String? { "public.png" }
+        func encode(source: URL, to destination: URL, format: ImageFormat, options: ImageEncodingOptions) throws -> EncodeOutcome {
+            try Data().write(to: destination)
+            return EncodeOutcome()
+        }
+    }
+
+    func testAnEncoderThatSucceedsWithoutWritingAnythingIsAFailureNotASuccess() async throws {
+        let source = try write(try makeImage(), as: .png, named: "a.png")
+        let results = await ImageConverter(encoder: SilentEncoder()).convert(files: [source], to: format("jpeg"), options: ImageEncodingOptions(), progress: { _, _ in })
+        XCTAssertEqual(results, [.failed(source: source, message: "the JPEG encoder produced no output")])
+        XCTAssertEqual(try files(), ["a.png"])
+    }
+
+    func testAnEmptyOutputFileIsAFailureAndIsRemoved() async throws {
+        let source = try write(try makeImage(), as: .png, named: "a.png")
+        let results = await ImageConverter(encoder: EmptyFileEncoder()).convert(files: [source], to: format("jpeg"), options: ImageEncodingOptions(), progress: { _, _ in })
+        XCTAssertEqual(results, [.failed(source: source, message: "the JPEG encoder produced no output")])
+        XCTAssertEqual(try files(), ["a.png"], "no zero-byte file, no temporary file")
+    }
+
+    func testADamagedPngIsReportedInsteadOfBeingConvertedFromHalfTheData() async throws {
+        let whole = try write(try noisyImage(), as: .png, named: "whole.png")
+        let data = try Data(contentsOf: whole)
+        let broken = dir.appendingPathComponent("broken.png")
+        try data.prefix(data.count / 2).write(to: broken)
+
+        let results = await convert([broken], to: "jpeg")
+
+        XCTAssertEqual(results, [.failed(source: broken, message: "damaged or incomplete")])
+        XCTAssertEqual(try files(), ["broken.png", "whole.png"])
+    }
+
+    func testADamagedJpegIsReportedToo() async throws {
+        let whole = try write(try noisyImage(), as: .jpeg, named: "whole.jpg")
+        let data = try Data(contentsOf: whole)
+        let broken = dir.appendingPathComponent("broken.jpg")
+        try data.prefix(data.count / 2).write(to: broken)
+        let results = await convert([broken], to: "png")
+        XCTAssertEqual(results, [.failed(source: broken, message: "damaged or incomplete")])
+    }
+
+    func testAFileWithoutReadPermissionSaysSoInsteadOfNotAnImage() async throws {
+        let source = try write(try makeImage(), as: .png, named: "locked.png")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: source.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: source.path) }
+        let results = await convert([source], to: "jpeg")
+        XCTAssertEqual(results, [.failed(source: source, message: "can’t be read (no permission)")])
+    }
+
+    func testAFolderWithoutWritePermissionSaysSoAndLeavesTheOriginalAlone() async throws {
+        let source = try write(try makeImage(), as: .png, named: "a.png")
+        let before = try Data(contentsOf: source)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
+
+        let results = await convert([source], to: "jpeg")
+
+        XCTAssertEqual(results, [.failed(source: source, message: "no permission to save in this folder")])
+        XCTAssertEqual(try Data(contentsOf: source), before)
+        XCTAssertEqual(try files(), ["a.png"])
+    }
+
+    func testAnEncoderErrorFromOutsideOurWorldIsStillPutInWords() async throws {
+        struct Throwing: ImageEncoder {
+            func detectType(of url: URL) -> String? { "public.png" }
+            func encode(source: URL, to destination: URL, format: ImageFormat, options: ImageEncodingOptions) throws -> EncodeOutcome {
+                throw CocoaError(.fileWriteOutOfSpace)
+            }
+        }
+        let source = try write(try makeImage(), as: .png, named: "a.png")
+        let results = await ImageConverter(encoder: Throwing()).convert(files: [source], to: format("jpeg"), options: ImageEncodingOptions(), progress: { _, _ in })
+        XCTAssertEqual(results, [.failed(source: source, message: "not enough disk space")])
+    }
+
+    func testEveryFailureInAMixedBatchIsCountedAndTheGoodFilesStillConvert() async throws {
+        let good = try write(try makeImage(), as: .png, named: "good.png")
+        let text = dir.appendingPathComponent("notes.png")
+        try Data("nope".utf8).write(to: text)
+        let missing = dir.appendingPathComponent("gone.png")
+        let results = await convert([text, good, missing], to: "jpeg")
+        let summary = ConversionSummary(results: results, format: format("jpeg"))
+        XCTAssertEqual(summary.convertedCount, 1)
+        XCTAssertEqual(summary.failedCount, 2)
+        XCTAssertEqual(summary.message, "Converted 1 of 3 files to JPEG · 2 failed: notes.png (not an image), gone.png (file not found)")
     }
 
     // MARK: Batches

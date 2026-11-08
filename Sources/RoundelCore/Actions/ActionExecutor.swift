@@ -14,6 +14,21 @@ public final class ActionExecutor {
         self.reporter = reporter
     }
 
+    /// Runs the node the ring committed, found by id. An id that is missing or is a group is reported to the user, not
+    /// only logged: a selection that does nothing, silently, looks exactly like a bug.
+    public func execute(nodeWithID id: String, in config: RoundelConfig, files: [URL] = []) async {
+        switch config.node(withID: id) {
+        case .action(let node)?:
+            await execute(node, files: files)
+        case .group(let group)?:
+            reporter.warning("Selected '\(id)' but it is a group, not an action")
+            reporter.toast("“\(group.title)” is a group, not an action", isError: true)
+        case nil:
+            reporter.warning("Selected '\(id)' but it is not in the current config")
+            reporter.toast("“\(id)” is not in the current config", isError: true)
+        }
+    }
+
     /// - Parameter files: the files dropped on the node, if the ring was used for a file drag.
     public func execute(_ node: ActionNode, files: [URL] = []) async {
         guard let action = registry.action(for: node.action) else {

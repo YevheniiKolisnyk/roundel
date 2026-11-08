@@ -54,6 +54,10 @@ public struct ImageConvertAction: Action {
             if showsProgress { report(ConversionSummary.progressMessage(done: done, total: total)) }
         }
 
+        // Every dropped file must come back as converted, skipped or failed; anything else would read as "nothing to do".
+        guard results.count == context.files.count else {
+            throw ActionError.failed("the converter reported on \(results.count) of \(context.files.count) files")
+        }
         let summary = ConversionSummary(results: results, format: format)
         if summary.isTotalFailure { throw ActionError.failed(summary.failureText) }
         return summary.isWarning ? .warning(summary.message) : .message(summary.message)

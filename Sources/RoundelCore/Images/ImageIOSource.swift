@@ -22,6 +22,10 @@ public enum ImageIOSource {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(source) as String? else {
             throw ImageConversionError.unreadable
         }
+        // ImageIO decodes a truncated PNG or JPEG as a complete image, so the file's own structure has to be checked.
+        if let data = try? Data(contentsOf: url, options: .mappedIfSafe), ImageIntegrity.isComplete(data, detectedType: type) == false {
+            throw ImageConversionError.damaged
+        }
         let index = CGImageSourceGetPrimaryImageIndex(source)
         guard var image = CGImageSourceCreateImageAtIndex(source, index, nil) else { throw ImageConversionError.unreadable }
         var properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] ?? [:]

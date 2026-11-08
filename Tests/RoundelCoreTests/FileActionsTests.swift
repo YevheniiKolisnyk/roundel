@@ -142,7 +142,7 @@ final class FileActionsTests: XCTestCase {
 
     func testProgressIsForwardedAsText() async throws {
         fakes.imageConverter.progressSteps = [(1, 3), (2, 3), (3, 3)]
-        fakes.imageConverter.results = [.skipped(source: a, reason: .alreadyInFormat)]
+        fakes.imageConverter.results = Array(repeating: .skipped(source: a, reason: .alreadyInFormat), count: 3)
         let log = TextLog()
         _ = try await convertAction().run(context(["format": .string("jpeg")], files: [a, b, a], progress: { log.add($0) }))
         XCTAssertEqual(log.lines, ["Converting 1/3", "Converting 2/3", "Converting 3/3"])
@@ -154,6 +154,15 @@ final class FileActionsTests: XCTestCase {
         let log = TextLog()
         _ = try await convertAction().run(context(["format": .string("jpeg")], files: [a], progress: { log.add($0) }))
         XCTAssertTrue(log.lines.isEmpty)
+    }
+
+    func testAConverterThatAnswersForFewerFilesThanWereDroppedIsAnErrorNotASuccess() async {
+        fakes.imageConverter.results = []
+        let message = await failureMessage { try await convertAction().run(context(["format": .string("jpeg")], files: [a, b])) }
+        XCTAssertEqual(message, "the converter reported on 0 of 2 files")
+        fakes.imageConverter.results = [.converted(source: a, output: URL(fileURLWithPath: "/tmp/a.jpg"), notes: [])]
+        let one = await failureMessage { try await convertAction().run(context(["format": .string("jpeg")], files: [a, b])) }
+        XCTAssertEqual(one, "the converter reported on 1 of 2 files")
     }
 
     func testRunWithoutFilesFails() async {

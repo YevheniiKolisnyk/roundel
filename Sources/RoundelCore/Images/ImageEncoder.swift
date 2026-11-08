@@ -36,6 +36,11 @@ public enum ImageConversionError: Error, Equatable, Sendable {
     case unreadable
     case encodeFailed(format: String)
     case tooLarge(format: String, limit: Int)
+    /// The file ends before the image does (a failed download, a full disk): ImageIO would still decode it, with the
+    /// missing part grey, and report success.
+    case damaged
+    /// The encoder said it was done but left no file, or an empty one.
+    case noOutput(format: String)
 
     /// Safe to show to the user as is.
     public var message: String {
@@ -44,6 +49,8 @@ public enum ImageConversionError: Error, Equatable, Sendable {
         case .unreadable: "can’t be read"
         case .encodeFailed(let format): "the system couldn’t write \(format)"
         case .tooLarge(let format, let limit): "too large for \(format) (max \(limit) pixels per side)"
+        case .damaged: "damaged or incomplete"
+        case .noOutput(let format): "the \(format) encoder produced no output"
         }
     }
 }

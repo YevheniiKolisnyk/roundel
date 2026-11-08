@@ -18,15 +18,18 @@ final class ToastPresenter {
         // Toasts vanish after a few seconds; keep a trace for diagnosing and for scripted checks.
         if logged { Log.info("toast\(isError ? " (error)" : ""): \(message.replacingOccurrences(of: "\n", with: " / "))") }
 
-        let hosting = NSHostingView(rootView: ToastView(message: message, isError: isError))
-        hosting.sizingOptions = []
-        let size = hosting.fittingSize
+        let (content, size) = ToastLayout.content(for: message, isError: isError)
 
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        panel.contentView = hosting
+        panel.contentView = content
         panel.setContentSize(size)
-        panel.setFrameOrigin(origin(for: size))
+        if panel.frame.width < 1 || panel.frame.height < 1 {
+            // A window with no area is on screen but invisible. It must never be silent about that.
+            Log.warning("Toast window has no area (\(panel.frame.size)); showing it at the default size. Message: \(message)")
+            panel.setContentSize(ToastLayout.usable(.zero))
+        }
+        panel.setFrameOrigin(origin(for: panel.frame.size))
         panel.alphaValue = 1
         panel.orderFrontRegardless()
 
@@ -67,12 +70,12 @@ final class ToastPresenter {
     private func origin(for size: NSSize) -> NSPoint {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main ?? NSScreen.screens.first
-        let frame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        return NSPoint(x: frame.maxX - size.width - 16, y: frame.maxY - size.height - 16)
+        let area = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        return ToastLayout.origin(for: size, in: area)
     }
 }
 
-private struct ToastView: View {
+struct ToastView: View {
     let message: String
     let isError: Bool
 
@@ -86,9 +89,7 @@ private struct ToastView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .frame(maxWidth: 380, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.12), lineWidth: 0.5))
-        .fixedSize()
     }
 }
