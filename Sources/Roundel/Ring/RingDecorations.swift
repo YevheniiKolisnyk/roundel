@@ -44,14 +44,45 @@ struct ConnectorStem: View {
     }
 }
 
-/// A small thin ring in the middle, where the pointer starts. Not a disc: the middle stays open.
+/// The middle: a small thin ring where the pointer starts, which gives way to the hovered item's name while there is
+/// one. Both live in a fixed frame, so nothing around moves when the name appears, changes or goes.
 struct CenterMark: View {
     let innerRadius: Double
+    /// The hovered item's name (nil or empty: none).
+    var title: String?
+    var isDimmed = false
+
     private let style = RingStyle.standard
+    private let info = SurfaceInfo()
+    private let design = DesignMetrics.standard
 
     var body: some View {
-        Circle()
-            .strokeBorder(Color.primary.opacity(style.centerRingOpacity), lineWidth: style.centerRingWidth)
-            .frame(width: min(style.centerRingDiameter, max(0, innerRadius)), height: min(style.centerRingDiameter, max(0, innerRadius)))
+        let name = (title ?? "").trimmingCharacters(in: .whitespaces)
+        let fit = name.isEmpty ? nil : ContentFit.centerLabel(name, radius: innerRadius, style: style)
+        let diameter = min(style.centerRingDiameter, max(0, innerRadius))
+        let fade = design.resolve(design.ringHighlightMotion, reduceMotion: info.reduceMotion).animation
+        ZStack {
+            Circle()
+                .strokeBorder(Color.primary.opacity(style.centerRingOpacity), lineWidth: style.centerRingWidth)
+                .frame(width: diameter, height: diameter)
+                .opacity(fit == nil ? 1 : 0)
+            if let fit {
+                // A soft backing, so the name reads on any desktop; only there while there is a name.
+                Color.clear
+                    .frame(width: max(0, 2 * innerRadius - 4), height: max(0, 2 * innerRadius - 4))
+                    .roundelSurface(in: Circle(), casting: false)
+                    .transition(.opacity)
+                Text(name)
+                    .font(.system(size: fit.fontSize, weight: .medium))
+                    .foregroundStyle(isDimmed ? Color.secondary : Color.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: fit.maxWidth)
+                    .id(name)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: 2 * innerRadius, height: 2 * innerRadius)
+        .animation(fade, value: name)
     }
 }

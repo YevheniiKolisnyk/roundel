@@ -72,6 +72,11 @@ public struct RingStyle: Equatable, Sendable {
     /// Distance from the band's outer edge to the chevron's center.
     public var chevronInset = 10.0
 
+    // The name of the hovered item, in the middle
+    public var centerLabelBaseSize = 11.0
+    /// Clear space between the name and the edge of the middle.
+    public var centerLabelPadding = 4.0
+
     // Content (labels, icons) must fit its cell
     public var labelBaseSize = 12.0
     public var labelMinSize = 9.0
@@ -243,5 +248,26 @@ public struct RingStyle: Equatable, Sendable {
         let room = maxWidth(forHeight: drawnHeight, angle: angle, in: room) / scale
         guard room >= labelMinSize else { return nil }
         return LabelFit(fontSize: labelMinSize, maxWidth: min(room, width * labelMinSize / labelBaseSize))
+    }
+
+    // MARK: The label in the middle
+
+    /// Fits a one-line name measuring `widthAtBaseSize` x `heightAtBaseSize` at `centerLabelBaseSize` into the circle of
+    /// the middle (`radius`), keeping `centerLabelPadding` from its edge: scaled down as far as the minimum size, then
+    /// truncated to what fits. Nil when nothing useful fits (or the measurements are nonsense).
+    public func centerLabelFit(widthAtBaseSize width: Double, heightAtBaseSize height: Double, radius: Double) -> LabelFit? {
+        guard width.isFinite, width > 0, height.isFinite, height > 0, radius.isFinite else { return nil }
+        let usable = radius - centerLabelPadding
+        guard usable > 0 else { return nil }
+        let k = usable / (hypot(width, height) / 2)
+        let wanted = centerLabelBaseSize * min(1, k)
+        if wanted >= labelMinSize {
+            return LabelFit(fontSize: wanted, maxWidth: width * wanted / centerLabelBaseSize)
+        }
+        let h = height * labelMinSize / centerLabelBaseSize
+        guard h / 2 < usable else { return nil }
+        let room = 2 * (usable * usable - (h / 2) * (h / 2)).squareRoot()
+        guard room >= labelMinSize else { return nil }
+        return LabelFit(fontSize: labelMinSize, maxWidth: min(room, width * labelMinSize / centerLabelBaseSize))
     }
 }

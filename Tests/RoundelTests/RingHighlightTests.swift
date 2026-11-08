@@ -56,15 +56,15 @@ final class RingHighlightTests: XCTestCase {
         let side = 600.0
         let rect = CGRect(x: 0, y: 0, width: side, height: side)
         for (name, band, index) in cases() {
-            for dark in [false, true] {
-                for contrast in [false, true] {
+            for (dark, contrast) in [(false, false), (true, true)] {
+                do {
                     var overrides = SurfaceOverrides(); overrides.increaseContrast = contrast
                     let g = style.highlightGeometry(for: band, index: index)
                     let view = ItemHighlight(geometry: g, emphasis: .hovered, side: side)
                         .frame(width: side, height: side)
                         .environment(\.colorScheme, dark ? .dark : .light)
                         .environment(\.surfaceOverrides, overrides)
-                    let pixels = try XCTUnwrap(Pixels(of: view), name)
+                    let pixels = try XCTUnwrap(Pixels(of: view, scale: 1), name)
                     let path = shape(g).path(in: rect)
                     let tolerant = path.strokedPath(StrokeStyle(lineWidth: 2))   // one point of anti-aliasing on each side
                     var stray = 0

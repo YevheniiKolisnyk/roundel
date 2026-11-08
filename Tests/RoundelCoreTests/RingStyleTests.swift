@@ -318,6 +318,56 @@ final class RingStyleTests: XCTestCase {
         }
     }
 
+    // MARK: The label in the middle
+
+    private func insideCircle(width: Double, height: Double, radius: Double) -> Bool {
+        (width / 2) * (width / 2) + (height / 2) * (height / 2) <= radius * radius + 1e-9
+    }
+
+    func testAShortCenterLabelKeepsItsSize() {
+        let fit = style.centerLabelFit(widthAtBaseSize: 30, heightAtBaseSize: 13, radius: 30)
+        XCTAssertEqual(fit?.fontSize, style.centerLabelBaseSize)
+        XCTAssertEqual(fit?.maxWidth ?? 0, 30, accuracy: 1e-9)
+    }
+
+    func testALongerCenterLabelIsScaledDownUntilItsBoxFitsTheCircle() throws {
+        let fit = try XCTUnwrap(style.centerLabelFit(widthAtBaseSize: 52, heightAtBaseSize: 13, radius: 30))
+        XCTAssertLessThan(fit.fontSize, style.centerLabelBaseSize)
+        XCTAssertGreaterThanOrEqual(fit.fontSize, style.labelMinSize)
+        let k = fit.fontSize / style.centerLabelBaseSize
+        XCTAssertTrue(insideCircle(width: 52 * k, height: 13 * k, radius: 30 - style.centerLabelPadding))
+    }
+
+    func testAVeryLongCenterLabelIsTruncatedAtTheMinimumSizeInsideTheCircle() throws {
+        let fit = try XCTUnwrap(style.centerLabelFit(widthAtBaseSize: 400, heightAtBaseSize: 13, radius: 30))
+        XCTAssertEqual(fit.fontSize, style.labelMinSize)
+        let h = 13 * style.labelMinSize / style.centerLabelBaseSize
+        XCTAssertTrue(insideCircle(width: fit.maxWidth, height: h, radius: 30 - style.centerLabelPadding))
+        XCTAssertGreaterThan(fit.maxWidth, 30, "still a useful amount of text")
+    }
+
+    func testNoCenterLabelWhenTheCircleIsTooSmallOrTheInputIsNonsense() {
+        XCTAssertNil(style.centerLabelFit(widthAtBaseSize: 30, heightAtBaseSize: 13, radius: 5))
+        XCTAssertNil(style.centerLabelFit(widthAtBaseSize: 0, heightAtBaseSize: 13, radius: 30))
+        XCTAssertNil(style.centerLabelFit(widthAtBaseSize: .nan, heightAtBaseSize: 13, radius: 30))
+        XCTAssertNil(style.centerLabelFit(widthAtBaseSize: 30, heightAtBaseSize: 13, radius: -Double.infinity))
+    }
+
+    func testACenterLabelNeverLeavesTheCircleWhateverItsLengthOrTheCirclesSize() {
+        for radius in [16.0, 22, 30, 40, 60] {
+            for width in stride(from: 4.0, through: 600, by: 17) {
+                for height in [10.0, 13, 16] {
+                    guard let fit = style.centerLabelFit(widthAtBaseSize: width, heightAtBaseSize: height, radius: radius) else { continue }
+                    let k = fit.fontSize / style.centerLabelBaseSize
+                    let drawnWidth = min(width * k, fit.maxWidth)
+                    XCTAssertTrue(insideCircle(width: drawnWidth, height: height * k, radius: radius - style.centerLabelPadding), "radius \(radius) width \(width) height \(height)")
+                    XCTAssertLessThanOrEqual(fit.fontSize, style.centerLabelBaseSize + 1e-9)
+                    XCTAssertGreaterThanOrEqual(fit.fontSize, style.labelMinSize - 1e-9)
+                }
+            }
+        }
+    }
+
     // MARK: Appearing
 
     func testTheRingAppearsFromJustBelowFullSize() {

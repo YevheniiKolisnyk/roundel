@@ -75,7 +75,7 @@ private struct RingVisuals: View {
                 }
             }
             if let root = model.bands.first {
-                CenterMark(innerRadius: root.band.innerRadius)
+                CenterMark(innerRadius: root.band.innerRadius, title: model.hoveredItem?.item.title, isDimmed: model.hoveredItem?.item.isDimmed ?? false)
             }
         }
     }

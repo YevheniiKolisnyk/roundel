@@ -35,6 +35,12 @@ final class RingModel {
     var hovered: RingItemRef?
     /// The groups whose arcs are open.
     var openParents: Set<RingItemRef> = []
+    /// The item under the pointer, if any (its name goes in the middle).
+    var hoveredItem: DisplayItem? {
+        guard let hovered, bands.indices.contains(hovered.level) else { return nil }
+        let items = bands[hovered.level].items
+        return items.indices.contains(hovered.index) ? items[hovered.index] : nil
+    }
     var panelSide = 0.0
     /// The area the ring owns on screen, gaps included (see `RingLayout.footprint`).
     var footprint: [RingFootprintRegion] = []
