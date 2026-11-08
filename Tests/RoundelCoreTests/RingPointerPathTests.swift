@@ -96,12 +96,38 @@ final class RingPointerPathTests: XCTestCase {
     }
 
     func testSlowDiagonalsSurviveCrossingTheGap() {
-        // Down to about 80 pt/s the pointer is in the gap for less than the hysteresis.
+        // Down to about 80 pt/s the pointer is in the gap for less than the hysteresis (the gap is still 8 pt, the hysteresis
+        // still 150 ms: the behaviour is the same). A cell that lies within the parent's own wedge (item 3 of 5) is reached
+        // by a line that stays over the parent section until the gap, whatever the speed.
         for duration in [0.5, 1.0, 1.5] {
+            var driver = driverWithArcOpen()
+            driver.move(to: itemPoint(driver.layout.bands[1], 3), over: duration)
+            driver.rest(0.05)
+            XCTAssertEqual(driver.nav.path, ["g"], "\(duration) s diagonal")
+        }
+    }
+
+    func testTheFarEndOfTheArcIsReachedByADiagonalDownToAboutThreeQuartersOfASecond() {
+        // Arc cells are 68 pt long now (were 44), so the far end of a 5-cell arc sits 46 degrees from the parent's axis
+        // (was 31), beyond the parent's own 60-degree wedge: a straight line to it also crosses the neighbouring section
+        // for a while, and that time counts against the 150 ms hysteresis. Such a diagonal used to survive 1.5 s, now about 0.75 s (1.0 s
+        // closes the arc); slower than that the arc closes, as it always did for a slow enough move; going out first and then along the arc (next test) has no such limit.
+        for duration in [0.25, 0.5, 0.75] {
             var driver = driverWithArcOpen()
             driver.move(to: itemPoint(driver.layout.bands[1], 4), over: duration)
             driver.rest(0.05)
             XCTAssertEqual(driver.nav.path, ["g"], "\(duration) s diagonal")
+        }
+    }
+
+    func testGoingOutFirstAndThenAlongTheArcReachesTheFarEndAtAnySpeed() {
+        for duration in [0.5, 1.5, 3.0] {
+            var driver = driverWithArcOpen()
+            driver.move(to: itemPoint(driver.layout.bands[1], 2), over: duration / 2)   // straight out to the middle cell
+            driver.move(to: itemPoint(driver.layout.bands[1], 4), over: duration / 2)   // then along the arc
+            driver.rest(0.05)
+            XCTAssertEqual(driver.nav.path, ["g"], "\(duration) s")
+            XCTAssertEqual(driver.nav.hovered, RingItemRef(level: 1, index: 4))
         }
     }
 

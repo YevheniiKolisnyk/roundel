@@ -14,17 +14,25 @@ public struct RingMetrics: Equatable, Sendable {
     public var rootIconRadiusFraction = 0.62
 
     // Arcs
-    /// Empty space between two bands (where the connector is drawn).
+    /// Empty space between two bands (where the connector is drawn). Unchanged on purpose: the arc closes when the
+    /// pointer has been in the gap for `closeHysteresis`, so crossing time (and with it how slowly one may cross
+    /// diagonally) is proportional to this number. Bigger cells do not need a bigger gap.
     public var bandGap = 8.0
-    public var bandThickness = 64.0
-    /// Arc length each item wants at its icon radius, in points.
+    /// Radial thickness of an arc. A group cell reserves room for its chevron (`RingStyle.chevronClearance`) and still has
+    /// to hold a four-letter format name turned sideways at 11 pt with the hover enlargement: 2 x (76 / 2 - 19) = 38 pt.
+    public var bandThickness = 76.0
+    /// Arc length each root item wants at its icon radius, in points (the root ring holds icons, mostly).
     public var minArcPerItem = 44.0
+    /// Arc length each arc cell wants at its icon radius, in points. The labels of an arc are words ("WebP", "Convert"):
+    /// seven Latin letters at the 11 pt floor with the 1.1 hover enlargement are about 49 pt; the cell's own insets (7 pt each side) and the turn of a cell towards the side take the rest.
+    public var arcMinItemLength = 68.0
     /// A single item never gets wider than this (radians), so a couple of children do not become huge wedges.
     public var maxItemAngle = 55.0 * Double.pi / 180
     /// An arc never sweeps more than this (radians), so it cannot wrap around onto itself.
     public var maxArcSweep = 300.0 * Double.pi / 180
     /// Outermost radius an arc may grow to; past it the items tighten instead.
-    public var arcRadiusCap = 360.0
+    /// Three arcs out from the root ring (the deepest the default config uses, plus one) fit within it.
+    public var arcRadiusCap = 400.0
 
     // Timing
     /// How long the pointer must stay away from the open chain before its arcs close.
@@ -67,7 +75,7 @@ public struct RingMetrics: Equatable, Sendable {
         let count = max(1, itemCount)
         let cap = maxOuterRadius ?? arcRadiusCap
 
-        let midRadiusNeeded = minArcPerItem * Double(count) / maxArcSweep
+        let midRadiusNeeded = arcMinItemLength * Double(count) / maxArcSweep
         var inner = max(innerRadius, midRadiusNeeded - bandThickness / 2)
         var outer = inner + bandThickness
         if outer > cap {
@@ -76,7 +84,7 @@ public struct RingMetrics: Equatable, Sendable {
         }
 
         let mid = (inner + outer) / 2
-        var width = min(maxItemAngle, minArcPerItem / mid)
+        var width = min(maxItemAngle, arcMinItemLength / mid)
         var crowded = false
         if width * Double(count) > maxArcSweep + 1e-9 {
             width = maxArcSweep / Double(count)

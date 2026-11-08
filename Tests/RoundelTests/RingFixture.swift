@@ -6,7 +6,16 @@ import RoundelCore
 /// Real layouts from the default config, as view models, for rendering tests.
 @MainActor
 enum RingFixture {
-    static let nodes = DefaultConfig.config.ring
+    /// The writable formats of a typical Mac, so the generated "convert to" arc has its real eight cells.
+    private struct Formats: ImageCapabilities {
+        var writableTypeIdentifiers = ["public.png", "public.jpeg", "public.heic", "public.tiff", "com.compuserve.gif", "com.microsoft.bmp", "public.avif", "org.webmproject.webp"]
+    }
+
+    /// The default config with its generated groups filled in, exactly as the app builds the ring.
+    static let nodes = ConfigResolver.resolve(DefaultConfig.config, generators: NodeGeneratorRegistry([ImageConvertFormatsGenerator(capabilities: Formats())])).config.ring
+
+    /// The path to the format arc, and its eight labels in order.
+    static let formatPath = ["files", "files.convert"]
 
     static func model(path: [String] = [], hover: RingItemRef? = nil, presented: Bool = true, placement: ArcPlacement.Context? = nil) -> RingModel {
         let layout = RingLayout.make(root: nodes, path: path, placement: placement)

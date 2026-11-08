@@ -14,12 +14,13 @@ final class RingSizingTests: XCTestCase {
         XCTAssertEqual(metrics.deadZoneRadius, 30)
         XCTAssertEqual(metrics.rootMinOuterRadius, 124)
         XCTAssertEqual(metrics.rootMaxOuterRadius, 220)
-        XCTAssertEqual(metrics.bandGap, 8)
-        XCTAssertEqual(metrics.bandThickness, 64)
-        XCTAssertEqual(metrics.minArcPerItem, 44)
+        XCTAssertEqual(metrics.bandGap, 8, "unchanged: crossing the gap takes time proportional to it, and the 150 ms hysteresis is tuned to it")
+        XCTAssertEqual(metrics.bandThickness, 76, "was 64: a group cell holding a sideways four-letter name at 11 pt with the hover scale, next to the chevron's slot")
+        XCTAssertEqual(metrics.minArcPerItem, 44, "the root ring is unchanged: its cells hold icons")
+        XCTAssertEqual(metrics.arcMinItemLength, 68, "was 44 (shared with the root): a 7-letter word at 11 pt with the hover scale in a cell turned towards the side")
         XCTAssertEqual(metrics.maxItemAngle, 55 * .pi / 180, accuracy: 1e-12)
         XCTAssertEqual(metrics.maxArcSweep, 300 * .pi / 180, accuracy: 1e-12)
-        XCTAssertEqual(metrics.arcRadiusCap, 360)
+        XCTAssertEqual(metrics.arcRadiusCap, 400, "was 360: with 76 pt bands three arcs out (the deepest the default config uses, plus one) still fit")
         XCTAssertEqual(metrics.closeHysteresis, 0.15)
     }
 
@@ -95,7 +96,7 @@ final class RingSizingTests: XCTestCase {
         XCTAssertEqual(band.innerRadius, 132)
         XCTAssertEqual(band.outerRadius, 132 + metrics.bandThickness)
         let mid = 132 + metrics.bandThickness / 2
-        XCTAssertEqual(band.itemWidth, metrics.minArcPerItem / mid, accuracy: 1e-9)
+        XCTAssertEqual(band.itemWidth, metrics.arcMinItemLength / mid, accuracy: 1e-9, "arc cells use their own length, not the root's")
         XCTAssertEqual(band.sweep, 3 * band.itemWidth, accuracy: 1e-9)
         XCTAssertFalse(band.isCrowded)
         XCTAssertEqual(band.level, 1)
@@ -109,14 +110,15 @@ final class RingSizingTests: XCTestCase {
 
     func testManyChildrenPushTheArcOutwardBeforeAnythingTightens() {
         let few = metrics.arcBand(level: 1, itemCount: 5, innerRadius: 132)
-        let many = metrics.arcBand(level: 1, itemCount: 30, innerRadius: 132)
+        // 20 children: with 68 pt cells (were 44) 30 would need a radius past the cap, so growth alone is shown with 20.
+        let many = metrics.arcBand(level: 1, itemCount: 20, innerRadius: 132)
         XCTAssertGreaterThan(many.innerRadius, few.innerRadius)
         XCTAssertEqual(many.outerRadius - many.innerRadius, metrics.bandThickness, accuracy: 1e-9)
         XCTAssertLessThanOrEqual(many.outerRadius, metrics.arcRadiusCap)
         XCTAssertLessThanOrEqual(many.sweep, metrics.maxArcSweep + 1e-9)
         XCTAssertFalse(many.isCrowded, "growing was enough")
         let mid = (many.innerRadius + many.outerRadius) / 2
-        XCTAssertGreaterThanOrEqual(many.itemWidth * mid, metrics.minArcPerItem - 1e-6, "every item still has its minimum arc length")
+        XCTAssertGreaterThanOrEqual(many.itemWidth * mid, metrics.arcMinItemLength - 1e-6, "every item still has its minimum arc length")
     }
 
     func testAtTheCapItemsTightenAndTheArcIsCrowded() {

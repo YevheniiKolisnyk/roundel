@@ -238,8 +238,9 @@ final class RingStyleTests: XCTestCase {
 
     func testALabelThatIsTooWideIsScaledDownToFit() throws {
         let room = RingStyle.CellRoom(halfRadial: 25, halfTangential: 15)
-        let fit = try XCTUnwrap(style.labelFit(widthAtBaseSize: 36, heightAtBaseSize: 14, angle: 0, in: room, scale: 1))
-        XCTAssertEqual(fit.fontSize, style.labelBaseSize * 30 / 36, accuracy: 1e-9)
+        // The floor is 11 pt and the base 12, so only a label up to 12/11 wider than the room is scaled; wider ones are cut.
+        let fit = try XCTUnwrap(style.labelFit(widthAtBaseSize: 32.5, heightAtBaseSize: 14, angle: 0, in: room, scale: 1))
+        XCTAssertEqual(fit.fontSize, style.labelBaseSize * 30 / 32.5, accuracy: 1e-9)
         XCTAssertGreaterThanOrEqual(fit.fontSize, style.labelMinSize)
     }
 
@@ -333,15 +334,15 @@ final class RingStyleTests: XCTestCase {
     func testALongerCenterLabelIsScaledDownUntilItsBoxFitsTheCircle() throws {
         let fit = try XCTUnwrap(style.centerLabelFit(widthAtBaseSize: 52, heightAtBaseSize: 13, radius: 30))
         XCTAssertLessThan(fit.fontSize, style.centerLabelBaseSize)
-        XCTAssertGreaterThanOrEqual(fit.fontSize, style.labelMinSize)
+        XCTAssertGreaterThanOrEqual(fit.fontSize, style.centerLabelMinSize)
         let k = fit.fontSize / style.centerLabelBaseSize
         XCTAssertTrue(insideCircle(width: 52 * k, height: 13 * k, radius: 30 - style.centerLabelPadding))
     }
 
     func testAVeryLongCenterLabelIsTruncatedAtTheMinimumSizeInsideTheCircle() throws {
         let fit = try XCTUnwrap(style.centerLabelFit(widthAtBaseSize: 400, heightAtBaseSize: 13, radius: 30))
-        XCTAssertEqual(fit.fontSize, style.labelMinSize)
-        let h = 13 * style.labelMinSize / style.centerLabelBaseSize
+        XCTAssertEqual(fit.fontSize, style.centerLabelMinSize)
+        let h = 13 * style.centerLabelMinSize / style.centerLabelBaseSize
         XCTAssertTrue(insideCircle(width: fit.maxWidth, height: h, radius: 30 - style.centerLabelPadding))
         XCTAssertGreaterThan(fit.maxWidth, 30, "still a useful amount of text")
     }
@@ -362,7 +363,7 @@ final class RingStyleTests: XCTestCase {
                     let drawnWidth = min(width * k, fit.maxWidth)
                     XCTAssertTrue(insideCircle(width: drawnWidth, height: height * k, radius: radius - style.centerLabelPadding), "radius \(radius) width \(width) height \(height)")
                     XCTAssertLessThanOrEqual(fit.fontSize, style.centerLabelBaseSize + 1e-9)
-                    XCTAssertGreaterThanOrEqual(fit.fontSize, style.labelMinSize - 1e-9)
+                    XCTAssertGreaterThanOrEqual(fit.fontSize, style.centerLabelMinSize - 1e-9)
                 }
             }
         }

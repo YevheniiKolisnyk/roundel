@@ -74,12 +74,16 @@ public struct RingStyle: Equatable, Sendable {
 
     // The name of the hovered item, in the middle
     public var centerLabelBaseSize = 11.0
+    /// The middle is small (a 30 pt radius), so its name may shrink further than a cell's label before it is cut.
+    public var centerLabelMinSize = 9.0
     /// Clear space between the name and the edge of the middle.
     public var centerLabelPadding = 4.0
 
     // Content (labels, icons) must fit its cell
     public var labelBaseSize = 12.0
-    public var labelMinSize = 9.0
+    /// Labels are never drawn smaller than this; a cell that is too small is made bigger (see `RingMetrics`), or the
+    /// word is cut with an ellipsis, never shrunk further.
+    public var labelMinSize = 11.0
     /// Clear space between content and the highlight's edge (or the chevron).
     public var labelPadding = 4.0
     /// How far content stays from every side of its cell: the highlight's own inset plus the padding.
@@ -261,13 +265,13 @@ public struct RingStyle: Equatable, Sendable {
         guard usable > 0 else { return nil }
         let k = usable / (hypot(width, height) / 2)
         let wanted = centerLabelBaseSize * min(1, k)
-        if wanted >= labelMinSize {
+        if wanted >= centerLabelMinSize {
             return LabelFit(fontSize: wanted, maxWidth: width * wanted / centerLabelBaseSize)
         }
-        let h = height * labelMinSize / centerLabelBaseSize
+        let h = height * centerLabelMinSize / centerLabelBaseSize
         guard h / 2 < usable else { return nil }
         let room = 2 * (usable * usable - (h / 2) * (h / 2)).squareRoot()
-        guard room >= labelMinSize else { return nil }
-        return LabelFit(fontSize: labelMinSize, maxWidth: min(room, width * labelMinSize / centerLabelBaseSize))
+        guard room >= centerLabelMinSize else { return nil }
+        return LabelFit(fontSize: centerLabelMinSize, maxWidth: min(room, width * centerLabelMinSize / centerLabelBaseSize))
     }
 }

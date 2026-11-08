@@ -84,11 +84,56 @@ final class RingLayoutFitTests: XCTestCase {
         }
     }
 
-    func testShortFormatNamesAreAlwaysShownInLeafCellsOfAnyArc() {
-        for band in bands() where band.level == 1 && band.count >= 3 {
-            for index in 0..<band.count {
-                for text in ["PNG", "WebP", "AVIF", "Абв", "HEIC"] {
-                    XCTAssertNotNil(ContentFit.label(text, band: band, index: index, hasChevron: false, scale: style.hoverIconScale, style: style), "'\(text)' count \(band.count) item \(index)")
+    /// What the old version of this test claimed ("always shown") but did not check: it asked for a non-nil fit on
+    /// invented arcs, and a label cut down to "We…" at the minimum size is a non-nil fit. This one takes the real arc the
+    /// app builds from the default config, and demands the whole word at no less than the floor size.
+    func testEveryLabelOfTheRealFormatArcIsWholeAtTheFloorSizeAtRestAndOnHover() throws {
+        let model = RingFixture.model(path: RingFixture.formatPath)
+        let arc = try XCTUnwrap(model.bands.last)
+        XCTAssertEqual(arc.items.count, 8, "the eight formats")
+        for (index, display) in arc.items.enumerated() {
+            guard case .letter(let text) = display.icon else { XCTFail("format cells carry their name as text"); continue }
+            XCTAssertFalse(display.item.isGroup, "leaf cells reserve no chevron slot")
+            for scale in [1.0, style.hoverIconScale] {
+                let fit = try XCTUnwrap(ContentFit.label(text, band: arc.band, index: index, hasChevron: false, scale: scale, style: style), "'\(text)' scale \(scale)")
+                XCTAssertGreaterThanOrEqual(fit.fontSize, 11 - 1e-9, "'\(text)' is not drawn smaller than 11 pt")
+                let whole = ContentFit.measure(text, size: fit.fontSize).width
+                XCTAssertGreaterThanOrEqual(fit.maxWidth, whole - 1e-9, "'\(text)' (\(whole) pt at \(fit.fontSize) pt) is cut to \(fit.maxWidth) pt at scale \(scale), cell \(index)")
+            }
+        }
+    }
+
+    func testLongerLabelsUpToSevenLettersAreWholeInEveryLeafCellOfEveryArcLevel() throws {
+        // Seven Latin letters ("Convert", 43 pt at 11 pt) or six Cyrillic ones ("Привіт", 38 pt): longer names are cut at the
+        // floor size with an ellipsis (the whole name is in the middle of the ring while the cell is hovered).
+        for path in [["launch"], ["launch", "launch.links"], RingFixture.formatPath, ["system"]] {
+            let model = RingFixture.model(path: path)
+            for bandModel in model.bands where bandModel.band.level > 0 {
+                for index in 0..<bandModel.band.count {
+                    for text in ["Convert", "Привіт", "Wi-Fi", "Lock"] {
+                        let fit = try XCTUnwrap(ContentFit.label(text, band: bandModel.band, index: index, hasChevron: false, scale: style.hoverIconScale, style: style))
+                        XCTAssertGreaterThanOrEqual(fit.fontSize, 11 - 1e-9)
+                        XCTAssertGreaterThanOrEqual(fit.maxWidth, ContentFit.measure(text, size: fit.fontSize).width - 1e-9, "'\(text)' path \(path) level \(bandModel.band.level) cell \(index)")
+                    }
+                }
+            }
+        }
+    }
+
+    func testAGroupCellKeepsAFourLetterNameWholeAtTheFloorSizeNextToItsChevron() throws {
+        // A group cell reserves the chevron's slot, which takes radial room; the band must be thick enough that a name like
+        // "WebP" turned sideways (at 3 or 9 o'clock the radial extent is the name's width) still fits at 11 pt with the hover scale.
+        for count in 3...12 {
+            let group = Node.group(GroupNode(id: "g", title: "G", icon: nil, children: (0..<count).map { .action(ActionNode(id: "c\($0)", title: "C", action: "log", params: .object([:]))) }))
+            for placement in [Double.pi / 2, -Double.pi / 2, 0, Double.pi] {
+                let arc = RingLayout.make(root: [group, .action(ActionNode(id: "x", title: "X", action: "log", params: .object([:])))], path: ["g"]).bands[1]
+                // The same arc turned so that its middle faces `placement`: only the cells' angles matter to the fit.
+                let turned = RingBand(level: 1, innerRadius: arc.innerRadius, outerRadius: arc.outerRadius, startAngle: placement - arc.sweep / 2, itemWidth: arc.itemWidth,
+                                      count: arc.count, iconRadius: arc.iconRadius, iconSize: arc.iconSize, isCrowded: arc.isCrowded)
+                for index in 0..<turned.count {
+                    let fit = try XCTUnwrap(ContentFit.label("WebP", band: turned, index: index, hasChevron: true, scale: style.hoverIconScale, style: style))
+                    XCTAssertGreaterThanOrEqual(fit.fontSize, 11 - 1e-9)
+                    XCTAssertGreaterThanOrEqual(fit.maxWidth, ContentFit.measure("WebP", size: fit.fontSize).width - 1e-9, "count \(count) facing \(placement) cell \(index)")
                 }
             }
         }
