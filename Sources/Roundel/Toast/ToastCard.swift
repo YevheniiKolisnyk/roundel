@@ -39,6 +39,8 @@ struct ToastCard: View {
             ProgressView().controlSize(.small)
         case .success:
             symbol("checkmark.circle.fill", .green)
+        case .info:
+            symbol("info.circle.fill", .secondary)
         case .warning:
             symbol("exclamationmark.triangle.fill", .orange)
         case .error:
@@ -57,6 +59,7 @@ struct ToastCard: View {
         let kind: String
         switch message.kind {
         case .success: kind = "Done"
+        case .info: kind = "Note"
         case .warning: kind = "Warning"
         case .error: kind = "Error"
         case .progress: kind = "In progress"

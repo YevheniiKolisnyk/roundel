@@ -103,7 +103,7 @@ final class ToastMessageTests: XCTestCase {
     }
 
     func testTheKindIsKept() {
-        for kind in [ToastKind.success, .warning, .error, .progress] { XCTAssertEqual(parse("Hello", kind).kind, kind) }
+        for kind in [ToastKind.success, .info, .warning, .error, .progress] { XCTAssertEqual(parse("Hello", kind).kind, kind) }
     }
 
     func testTheOldBooleanMapsToAKind() {
@@ -112,6 +112,7 @@ final class ToastMessageTests: XCTestCase {
         XCTAssertTrue(ToastKind.error.isErrorStyle)
         XCTAssertTrue(ToastKind.warning.isErrorStyle)
         XCTAssertFalse(ToastKind.success.isErrorStyle)
+        XCTAssertFalse(ToastKind.info.isErrorStyle, "neutral: not drawn like a problem")
         XCTAssertFalse(ToastKind.progress.isErrorStyle)
     }
 }

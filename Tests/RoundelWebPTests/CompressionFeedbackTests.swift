@@ -113,6 +113,7 @@ final class CompressionFeedbackTests: XCTestCase {
         await run([low])
         XCTAssertEqual(screen.toasts.last?.message, "low.jpg is already optimal")
         XCTAssertEqual(screen.toasts.last?.isError, false)
+        XCTAssertEqual(screen.kinds.last, .info, "neutral, not the green check")
         XCTAssertEqual(try names(), ["low.jpg"])
     }
 }

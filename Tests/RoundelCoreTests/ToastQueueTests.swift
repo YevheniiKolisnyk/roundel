@@ -11,6 +11,7 @@ final class ToastQueueTests: XCTestCase {
 
     func testDurationsByKind() {
         XCTAssertEqual(ToastQueue.duration(for: message("ok", .success)), 3)
+        XCTAssertEqual(ToastQueue.duration(for: message("ok", .info)), 4, "a little longer than a success: it explains why nothing happened")
         XCTAssertEqual(ToastQueue.duration(for: message("careful", .warning)), 6)
         XCTAssertEqual(ToastQueue.duration(for: message("broken", .error)), 6)
         XCTAssertNil(ToastQueue.duration(for: message("Converting 3/10", .progress)), "progress stays until it is replaced")

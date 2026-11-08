@@ -36,6 +36,7 @@ public struct ToastQueue: Sendable {
         switch message.kind {
         case .progress: return nil
         case .success: base = 3
+        case .info: base = 4
         case .warning, .error: base = 6
         }
         let characters = message.title.count + (message.detail?.count ?? 0)

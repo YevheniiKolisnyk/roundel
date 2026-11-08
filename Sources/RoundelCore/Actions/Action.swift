@@ -28,6 +28,8 @@ public enum ActionResult: Equatable, Sendable {
     case done
     /// Short feedback shown as a toast, e.g. "Caffeinate on".
     case message(String)
+    /// Neutral feedback: nothing was done and nothing went wrong ("already optimal", "skipped"). Not the green success check.
+    case info(String)
     /// Like `message`, but something went partly wrong: shown in the error style.
     case warning(String)
 }

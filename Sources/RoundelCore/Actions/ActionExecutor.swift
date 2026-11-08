@@ -78,6 +78,7 @@ public final class ActionExecutor {
             switch result {
             case .done: break
             case .message(let text): reporter.toast(text, kind: .success)
+            case .info(let text): reporter.toast(text, kind: .info)
             case .warning(let text): reporter.toast(text, kind: .warning)
             }
         } catch is CancellationError {

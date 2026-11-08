@@ -128,7 +128,7 @@ final class ImageCompressorTests: TempDirTestCase {
         let url = dir.appendingPathComponent("portrait.jpg")
         try (out as Data).write(to: url)
         let depth = await compress([url])
-        XCTAssertEqual(depth, [.skipped(source: url, reason: .hasAuxiliaryData)])
+        XCTAssertEqual(depth, [.skipped(source: url, reason: .hasAuxiliaryData([.disparity]))])
     }
 
     // MARK: Failures

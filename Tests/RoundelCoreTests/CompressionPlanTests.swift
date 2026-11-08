@@ -3,12 +3,12 @@ import XCTest
 
 /// What is done with a file, decided from facts about it (pure).
 final class CompressionPlanTests: XCTestCase {
-    private func facts(_ type: String, animated: Bool = false, aux: Bool = false, ijg: Int? = nil, webpLossless: Bool? = nil) -> ImageFacts {
-        ImageFacts(detectedType: type, isAnimated: animated, hasAuxiliaryData: aux, jpegQualityIJG: ijg, webpIsLossless: webpLossless)
+    private func facts(_ type: String, animated: Bool = false, aux: [AuxiliaryKind] = [], ijg: Int? = nil, webpLossless: Bool? = nil) -> ImageFacts {
+        ImageFacts(detectedType: type, isAnimated: animated, auxiliaryData: aux, jpegQualityIJG: ijg, webpIsLossless: webpLossless)
     }
     private func decide(_ f: ImageFacts, _ o: CompressionOptions = CompressionOptions()) -> CompressionDecision { CompressionPlan.decide(f, options: o) }
-    private func options(_ preset: CompressionPreset, quality: Double? = nil, maxDimension: Int? = nil, strip: Bool = false) -> CompressionOptions {
-        CompressionOptions(preset: preset, quality: quality, maxDimension: maxDimension, stripMetadata: strip)
+    private func options(_ preset: CompressionPreset, quality: Double? = nil, maxDimension: Int? = nil, strip: Bool = false, dropHDR: Bool = false) -> CompressionOptions {
+        CompressionOptions(preset: preset, quality: quality, maxDimension: maxDimension, stripMetadata: strip, dropHDRData: dropHDR)
     }
 
     // MARK: Presets
@@ -28,9 +28,9 @@ final class CompressionPlanTests: XCTestCase {
     }
 
     func testOptionsFromParams() {
-        XCTAssertEqual(CompressionOptions(params: Params(.object([:]))), CompressionOptions(preset: .balanced, quality: nil, maxDimension: nil, stripMetadata: false), "balanced by default")
-        let full = Params(.object(["preset": .string("strong"), "quality": .number(0.3), "maxDimension": .number(2048), "stripMetadata": .bool(true)]))
-        XCTAssertEqual(CompressionOptions(params: full), CompressionOptions(preset: .strong, quality: 0.3, maxDimension: 2048, stripMetadata: true))
+        XCTAssertEqual(CompressionOptions(params: Params(.object([:]))), CompressionOptions(preset: .balanced, quality: nil, maxDimension: nil, stripMetadata: false, dropHDRData: false), "balanced by default")
+        let full = Params(.object(["preset": .string("strong"), "quality": .number(0.3), "maxDimension": .number(2048), "stripMetadata": .bool(true), "dropHDRData": .bool(true)]))
+        XCTAssertEqual(CompressionOptions(params: full), CompressionOptions(preset: .strong, quality: 0.3, maxDimension: 2048, stripMetadata: true, dropHDRData: true))
         XCTAssertEqual(CompressionOptions(params: Params(.object(["preset": .string("nonsense")]))).preset, .balanced)
     }
 
@@ -114,8 +114,22 @@ final class CompressionPlanTests: XCTestCase {
 
     func testHDRDepthAndLivePhotoDataMeansSkipped() {
         for type in ["public.heic", "public.jpeg"] {
-            XCTAssertEqual(decide(facts(type, aux: true, ijg: 95)), .skip(.hasAuxiliaryData), type)
+            XCTAssertEqual(decide(facts(type, aux: [.hdrGainMap, .depth], ijg: 95)), .skip(.hasAuxiliaryData([.hdrGainMap, .depth])), type)
+            XCTAssertEqual(decide(facts(type, aux: [.livePhoto])), .skip(.hasAuxiliaryData([.livePhoto])), type)
         }
+    }
+
+    func testDropHDRDataAllowsTheReEncodeAnyway() {
+        for type in ["public.heic", "public.jpeg"] {
+            guard case .reencode = decide(facts(type, aux: [.hdrGainMap, .depth, .livePhoto], ijg: 95), options(.balanced, dropHDR: true)) else { return XCTFail(type) }
+        }
+        XCTAssertEqual(decide(facts("public.jpeg", aux: [.depth], ijg: 95), options(.balanced, dropHDR: false)), .skip(.hasAuxiliaryData([.depth])), "off by default")
+    }
+
+    func testDropHDRDataChangesNothingForFilesWithoutExtras() {
+        let withFlag = decide(facts("public.jpeg", ijg: 95), options(.balanced, dropHDR: true))
+        XCTAssertEqual(withFlag, decide(facts("public.jpeg", ijg: 95), options(.balanced)))
+        XCTAssertEqual(decide(facts("public.png", aux: [.depth]), options(.balanced)), .optimizePNG(.init(effort: .thorough, stripMetadata: false)), "PNG is never skipped for extras")
     }
 
     // MARK: Everything else
@@ -138,7 +152,9 @@ final class CompressionPlanTests: XCTestCase {
     func testTheWordsTheUserSees() {
         XCTAssertEqual(CompressionSkipReason.animated.message, "animated, skipped (compressing would drop the animation)")
         XCTAssertEqual(CompressionSkipReason.useConvert("GIF").message, "GIF isn’t compressed; use Convert to WebP")
-        XCTAssertEqual(CompressionSkipReason.hasAuxiliaryData.message, "has HDR, depth or Live Photo data, skipped (re-encoding would drop it)")
+        XCTAssertEqual(CompressionSkipReason.hasAuxiliaryData([.hdrGainMap]).message, "has an HDR gain map, skipped (set dropHDRData to compress anyway)")
+        XCTAssertEqual(CompressionSkipReason.hasAuxiliaryData([.hdrGainMap, .depth]).message, "has an HDR gain map and depth data, skipped (set dropHDRData to compress anyway)")
+        XCTAssertEqual(CompressionSkipReason.hasAuxiliaryData([.hdrGainMap, .portraitMatte, .livePhoto]).message, "has an HDR gain map, a portrait matte and Live Photo pairing, skipped (set dropHDRData to compress anyway)")
         XCTAssertEqual(CompressionSkipReason.interlacedPNG.message, "interlaced PNG, skipped")
         XCTAssertEqual(CompressionSkipReason.unsupported("PSD").message, "PSD isn’t supported")
     }

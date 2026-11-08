@@ -8,7 +8,7 @@ public struct ImageCompressAction: Action {
     public var acceptedInputs: Set<ActionInput> { [.files] }
     public var paramRules: ParamRules {
         ParamRules(specs: [.string("preset", allowed: CompressionPreset.allCases.map(\.rawValue)), .number("quality", range: 0...1),
-                           .int("maxDimension", range: 16...100_000), .bool("stripMetadata")])
+                           .int("maxDimension", range: 16...100_000), .bool("stripMetadata"), .bool("dropHDRData")])
     }
 
     private let compressor: any ImageCompressing
@@ -37,6 +37,8 @@ public struct ImageCompressAction: Action {
         }
         let summary = CompressionSummary(results: results)
         if summary.isTotalFailure { throw ActionError.failed(summary.failureText) }
-        return summary.isWarning ? .warning(summary.message) : .message(summary.message)
+        if summary.isWarning { return .warning(summary.message) }
+        // Nothing was compressed and nothing went wrong (already optimal, skipped): neutral, not a success.
+        return summary.compressedCount == 0 ? .info(summary.message) : .message(summary.message)
     }
 }

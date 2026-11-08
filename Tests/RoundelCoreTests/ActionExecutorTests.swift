@@ -74,6 +74,16 @@ final class ActionExecutorTests: XCTestCase {
         XCTAssertFalse(reporter.toasts[0].isError)
     }
 
+    func testEachKindOfResultIsShownAsItsOwnKindOfToast() async {
+        let cases: [(ActionResult, ToastKind)] = [(.message("Done it"), .success), (.info("Nothing to do"), .info), (.warning("Partly"), .warning)]
+        for (result, kind) in cases {
+            let reporter = FakeReporter()
+            let executor = ActionExecutor(registry: ActionRegistry([StubAction(behavior: { result })]), permissions: permissions, reporter: reporter)
+            await executor.execute(node("n"))
+            XCTAssertEqual(reporter.kinds, [kind], "\(result)")
+        }
+    }
+
     func testActionErrorBecomesAnErrorToastWithTheActionTitle() async {
         let action = StubAction(title: "Open App", behavior: { throw ActionError.failed("Safari not found") })
         await executor([action]).execute(node("n"))

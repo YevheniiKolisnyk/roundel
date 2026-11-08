@@ -1,12 +1,13 @@
 import Foundation
 
 public enum ToastKind: String, Equatable, Sendable {
-    case success, warning, error, progress
+    case success, info, warning, error, progress
 
     public init(isError: Bool) {
         self = isError ? .error : .success
     }
 
+    /// `info` is neutral: something to know ("already optimal", "skipped"), neither a success nor a problem.
     /// Drawn in the attention style (the old `isError`).
     public var isErrorStyle: Bool { self == .error || self == .warning }
 }

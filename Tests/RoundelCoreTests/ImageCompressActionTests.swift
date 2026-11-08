@@ -31,6 +31,8 @@ final class ImageCompressActionTests: XCTestCase {
         XCTAssertTrue(issues(["maxDimension": .number(2)]).contains { $0.blocksRun })
         XCTAssertTrue(issues(["maxDimension": .number(1.5)]).contains { $0.blocksRun })
         XCTAssertTrue(issues(["stripMetadata": .string("yes")]).contains { $0.blocksRun })
+        XCTAssertTrue(issues(["dropHDRData": .bool(true)]).isEmpty)
+        XCTAssertTrue(issues(["dropHDRData": .string("yes")]).contains { $0.blocksRun })
     }
 
     func testTheTimeoutGrowsWithTheNumberOfFiles() {
@@ -43,11 +45,11 @@ final class ImageCompressActionTests: XCTestCase {
 
     func testItPassesTheFilesAndTheOptionsToTheCompressor() async throws {
         fakes.imageCompressor.results = [.compressed(source: url("a.jpg"), output: url("a compressed.jpg"), bytesBefore: 2_000_000, bytesAfter: 1_000_000)]
-        let params: JSONValue = .object(["preset": .string("strong"), "quality": .number(0.3), "maxDimension": .number(1600), "stripMetadata": .bool(true)])
+        let params: JSONValue = .object(["preset": .string("strong"), "quality": .number(0.3), "maxDimension": .number(1600), "stripMetadata": .bool(true), "dropHDRData": .bool(true)])
         _ = try await action.run(context(params, files: [url("a.jpg")]))
         let call = try XCTUnwrap(fakes.imageCompressor.calls.first)
         XCTAssertEqual(call.files, [url("a.jpg")])
-        XCTAssertEqual(call.options, CompressionOptions(preset: .strong, quality: 0.3, maxDimension: 1600, stripMetadata: true))
+        XCTAssertEqual(call.options, CompressionOptions(preset: .strong, quality: 0.3, maxDimension: 1600, stripMetadata: true, dropHDRData: true))
     }
 
     func testTheResultIsTheBatchSummary() async throws {
@@ -71,7 +73,7 @@ final class ImageCompressActionTests: XCTestCase {
     func testNothingToDoIsAQuietMessageNotAnError() async throws {
         fakes.imageCompressor.results = [.alreadyOptimal(source: url("a.jpg"))]
         let result = try await action.run(context(files: [url("a.jpg")]))
-        XCTAssertEqual(result, .message("a.jpg is already optimal"))
+        XCTAssertEqual(result, .info("a.jpg is already optimal"), "nothing was compressed and nothing went wrong: neutral, not a success")
     }
 
     func testProgressIsReportedOnlyForSeveralFiles() async throws {
@@ -96,7 +98,7 @@ final class ImageCompressActionTests: XCTestCase {
     // MARK: The group of presets
 
     func testThePresetsAreGeneratedAsThreeActionsWithSymbolsAndTheirPresetParam() {
-        let group = GroupNode(id: "files.compress", title: "Compress", children: [], generate: "image.compress.presets", params: .object(["maxDimension": .number(2000), "stripMetadata": .bool(true), "quality": .number(0.1)]))
+        let group = GroupNode(id: "files.compress", title: "Compress", children: [], generate: "image.compress.presets", params: .object(["maxDimension": .number(2000), "stripMetadata": .bool(true), "dropHDRData": .bool(true), "quality": .number(0.1)]))
         let nodes = ImageCompressPresetsGenerator().children(for: group)
         XCTAssertEqual(nodes.map(\.id), ["files.compress.light", "files.compress.balanced", "files.compress.strong"])
         XCTAssertEqual(nodes.map(\.title), ["Light", "Balanced", "Strong"])
@@ -106,11 +108,25 @@ final class ImageCompressActionTests: XCTestCase {
             XCTAssertEqual(Params(a.params).string("preset"), preset.rawValue)
             XCTAssertEqual(Params(a.params).int("maxDimension"), 2000)
             XCTAssertEqual(Params(a.params).bool("stripMetadata"), true)
+            XCTAssertEqual(Params(a.params).bool("dropHDRData"), true)
             XCTAssertNil(Params(a.params).double("quality"), "a quality on the group would make the three presets identical")
             guard case .symbol(let name)? = a.icon else { return XCTFail("a symbol: the title is too long for a cell and is shown in the middle") }
             XCTAssertTrue(name.hasPrefix("gauge.with.dots.needle."))
         }
         XCTAssertEqual(Set(nodes.compactMap { node -> String? in if case .action(let a) = node, case .symbol(let s)? = a.icon { s } else { nil } }).count, 3, "three different symbols")
+    }
+
+    func testASkippedBatchIsNeutralInfoAndASkipAloneIsNotASuccess() async throws {
+        fakes.imageCompressor.results = [.skipped(source: url("a.jpg"), reason: .hasAuxiliaryData([.hdrGainMap]))]
+        let skipped = try await action.run(context(files: [url("a.jpg")]))
+        XCTAssertEqual(skipped, .info("Nothing to compress · a.jpg: has an HDR gain map, skipped (set dropHDRData to compress anyway)"))
+
+        fakes.imageCompressor.results = [.alreadyOptimal(source: url("a.jpg")), .skipped(source: url("b.gif"), reason: .animated)]
+        guard case .info = try await action.run(context(files: [url("a.jpg"), url("b.gif")])) else { return XCTFail("info") }
+
+        // Real savings stay a success, partial failure a warning, total failure an error.
+        fakes.imageCompressor.results = [.compressed(source: url("a.jpg"), output: url("a compressed.jpg"), bytesBefore: 100, bytesAfter: 50), .skipped(source: url("b.gif"), reason: .animated)]
+        guard case .message = try await action.run(context(files: [url("a.jpg"), url("b.gif")])) else { return XCTFail("success") }
     }
 
     func testTheGeneratorAndTheActionAreRegistered() {
@@ -123,7 +139,7 @@ final class ImageCompressActionTests: XCTestCase {
         XCTAssertEqual(files.children.prefix(2).map(\.id), ["files.convert", "files.compress"])
         guard case .group(let compress) = files.children[1] else { return XCTFail() }
         XCTAssertEqual(compress.generate, "image.compress.presets")
-        for needle in ["image.compress", "stripMetadata", "maxDimension", "already optimal", "Strong is the same as Balanced for PNG", "GPS", "orientation", "at least 2%", "compressed"] {
+        for needle in ["image.compress", "stripMetadata", "dropHDRData", "gain map", "set dropHDRData to compress anyway", "maxDimension", "already optimal", "Strong is the same as Balanced for PNG", "GPS", "orientation", "at least 2%", "compressed"] {
             XCTAssertTrue(DefaultConfig.exampleJSON.contains(needle), "the example config explains: \(needle)")
         }
     }

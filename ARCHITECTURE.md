@@ -17,6 +17,9 @@ A short map of the parts that are not obvious from the folder names. `CLAUDE.md`
   inflate the image data, optionally store it in a smaller equivalent way (only when provably lossless, and never when the
   file has chunks whose meaning depends on the sample format), pick the best row filters, deflate again, keep every other
   chunk. The result is verified against the pixels before it is returned.
+- **Extras a re-encode would drop** (HDR gain map, depth/disparity, mattes, a Live Photo link; not MPF previews) make JPEG/HEIC
+  files skip unless `dropHDRData` is set. `swift run image-inspect <file>` is a read-only diagnostic that prints what a file holds,
+  its MPF index, and which of it Compress counts.
 - **Test tools:** `TestPNG` (an independent PNG writer and reader) and `TestImages` (generated pictures, SSIM, PSNR) live in
   the test target; the compression presets are held to similarity floors there, not at run time.
 

@@ -26,6 +26,8 @@ let package = Package(
                 .product(name: "libwebp", package: "libwebp-Xcode"),
             ]
         ),
+        // Diagnostic for image files (read-only), run with `swift run image-inspect <file>`; not part of the app.
+        .executableTarget(name: "image-inspect", dependencies: ["RoundelCore"], path: "Sources/image-inspect"),
         .executableTarget(
             name: "Roundel",
             dependencies: [

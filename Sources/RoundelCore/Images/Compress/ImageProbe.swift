@@ -21,7 +21,9 @@ public struct ImageIOProbe: ImageProbing {
 
         facts.isAnimated = ImageIOSource.isAnimated(type: detectedType, frames: frames)
         if detectedType == "public.jpeg" || detectedType == "public.heic" {
-            facts.hasAuxiliaryData = Self.hasAuxiliaryData(source, index: index) || Self.isLivePhoto(properties: properties)
+            var kinds = Self.auxiliaryKinds(source, index: index).map(\.kind)
+            if Self.livePhotoIdentifier(in: properties) != nil { kinds.append(.livePhoto) }
+            facts.auxiliaryData = AuxiliaryKind.allCases.filter { kinds.contains($0) }
         }
         if detectedType == "public.jpeg" || detectedType == "org.webmproject.webp",
            let data = try? Data(contentsOf: url, options: .mappedIfSafe) {
@@ -44,19 +46,36 @@ public struct ImageIOProbe: ImageProbing {
 
     // MARK: Pieces
 
-    /// HDR gain map, depth, disparity or a matte: data that lives next to the picture and that a plain re-encode drops.
-    static func hasAuxiliaryData(_ source: CGImageSource, index: Int) -> Bool {
-        var types: [CFString] = [kCGImageAuxiliaryDataTypeHDRGainMap, kCGImageAuxiliaryDataTypeDepth, kCGImageAuxiliaryDataTypeDisparity,
-                                 kCGImageAuxiliaryDataTypePortraitEffectsMatte, kCGImageAuxiliaryDataTypeSemanticSegmentationSkinMatte,
-                                 kCGImageAuxiliaryDataTypeSemanticSegmentationHairMatte, kCGImageAuxiliaryDataTypeSemanticSegmentationTeethMatte,
-                                 kCGImageAuxiliaryDataTypeSemanticSegmentationGlassesMatte, kCGImageAuxiliaryDataTypeSemanticSegmentationSkyMatte]
-        if #available(macOS 15.0, *) { types.append(kCGImageAuxiliaryDataTypeISOGainMap) }
-        return types.contains { CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, index, $0) != nil }
+    /// The auxiliary-data types ImageIO can hand over, with the kind each counts as and its name for reports.
+    static let auxiliaryTypes: [(type: CFString, kind: AuxiliaryKind, label: String)] = {
+        var list: [(CFString, AuxiliaryKind, String)] = [
+            (kCGImageAuxiliaryDataTypeHDRGainMap, .hdrGainMap, "HDR gain map (kCGImageAuxiliaryDataTypeHDRGainMap)"),
+            (kCGImageAuxiliaryDataTypeDepth, .depth, "Depth (kCGImageAuxiliaryDataTypeDepth)"),
+            (kCGImageAuxiliaryDataTypeDisparity, .disparity, "Disparity (kCGImageAuxiliaryDataTypeDisparity)"),
+            (kCGImageAuxiliaryDataTypePortraitEffectsMatte, .portraitMatte, "Portrait effects matte (kCGImageAuxiliaryDataTypePortraitEffectsMatte)"),
+            (kCGImageAuxiliaryDataTypeSemanticSegmentationSkinMatte, .semanticMatte, "Skin matte (kCGImageAuxiliaryDataTypeSemanticSegmentationSkinMatte)"),
+            (kCGImageAuxiliaryDataTypeSemanticSegmentationHairMatte, .semanticMatte, "Hair matte (kCGImageAuxiliaryDataTypeSemanticSegmentationHairMatte)"),
+            (kCGImageAuxiliaryDataTypeSemanticSegmentationTeethMatte, .semanticMatte, "Teeth matte (kCGImageAuxiliaryDataTypeSemanticSegmentationTeethMatte)"),
+            (kCGImageAuxiliaryDataTypeSemanticSegmentationGlassesMatte, .semanticMatte, "Glasses matte (kCGImageAuxiliaryDataTypeSemanticSegmentationGlassesMatte)"),
+            (kCGImageAuxiliaryDataTypeSemanticSegmentationSkyMatte, .semanticMatte, "Sky matte (kCGImageAuxiliaryDataTypeSemanticSegmentationSkyMatte)"),
+        ]
+        if #available(macOS 15.0, *) { list.append((kCGImageAuxiliaryDataTypeISOGainMap, .hdrGainMap, "ISO gain map (kCGImageAuxiliaryDataTypeISOGainMap)")) }
+        return list
+    }()
+
+    /// The kinds of extras image `index` carries, with the ImageIO type that revealed each (an MPF preview or thumbnail is
+    /// not among them: it is not auxiliary data, and dropping it loses nothing).
+    static func auxiliaryKinds(_ source: CGImageSource, index: Int) -> [(kind: AuxiliaryKind, label: String, info: [AnyHashable: Any])] {
+        auxiliaryTypes.compactMap { entry in
+            (CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, index, entry.type) as? [AnyHashable: Any]).map { (entry.kind, entry.label, $0) }
+        }
     }
 
-    /// A Live Photo's still carries Apple's content identifier (MakerApple tag 17), which ties it to its video.
-    static func isLivePhoto(properties: [CFString: Any]) -> Bool {
-        guard let apple = properties[kCGImagePropertyMakerAppleDictionary] as? [AnyHashable: Any] else { return false }
-        return apple["17"] != nil || apple[17] != nil
+    /// A Live Photo's still carries Apple's content identifier (MakerApple tag 17, a text UUID), which ties it to its video.
+    /// Only a non-empty text identifier counts.
+    static func livePhotoIdentifier(in properties: [CFString: Any]) -> String? {
+        guard let apple = properties[kCGImagePropertyMakerAppleDictionary] as? [AnyHashable: Any] else { return nil }
+        guard let identifier = (apple["17"] ?? apple[17]) as? String, !identifier.isEmpty else { return nil }
+        return identifier
     }
 }

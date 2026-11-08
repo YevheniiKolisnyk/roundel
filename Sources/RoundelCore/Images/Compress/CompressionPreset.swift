@@ -23,18 +23,23 @@ public struct CompressionOptions: Equatable, Sendable {
     public var quality: Double?
     public var maxDimension: Int?
     public var stripMetadata: Bool
+    /// Re-encode JPEG and HEIC files even when they carry an HDR gain map, depth data, mattes or a Live Photo link, which the
+    /// re-encode then drops (the picture becomes a plain SDR image). Off by default: such files are skipped.
+    public var dropHDRData: Bool
 
-    public init(preset: CompressionPreset = .balanced, quality: Double? = nil, maxDimension: Int? = nil, stripMetadata: Bool = false) {
+    public init(preset: CompressionPreset = .balanced, quality: Double? = nil, maxDimension: Int? = nil, stripMetadata: Bool = false, dropHDRData: Bool = false) {
         self.preset = preset
         self.quality = quality
         self.maxDimension = maxDimension
         self.stripMetadata = stripMetadata
+        self.dropHDRData = dropHDRData
     }
 
     public init(params: Params) {
         self.init(preset: params.string("preset").flatMap(CompressionPreset.init(rawValue:)) ?? .balanced,
                   quality: params.double("quality").map { min(max($0, 0), 1) },
                   maxDimension: params.int("maxDimension").flatMap { $0 > 0 ? $0 : nil },
-                  stripMetadata: params.bool("stripMetadata") ?? false)
+                  stripMetadata: params.bool("stripMetadata") ?? false,
+                  dropHDRData: params.bool("dropHDRData") ?? false)
     }
 }

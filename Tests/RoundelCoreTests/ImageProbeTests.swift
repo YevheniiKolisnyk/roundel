@@ -17,7 +17,7 @@ final class ImageProbeTests: TempDirTestCase {
         let f = try facts(url)
         XCTAssertEqual(f.detectedType, "public.jpeg")
         XCTAssertFalse(f.isAnimated)
-        XCTAssertFalse(f.hasAuxiliaryData)
+        XCTAssertEqual(f.auxiliaryData, [])
         XCTAssertEqual(Double(try XCTUnwrap(f.jpegQualityIJG)), 94, accuracy: 3)
         XCTAssertNil(f.webpIsLossless)
     }
@@ -33,7 +33,7 @@ final class ImageProbeTests: TempDirTestCase {
         XCTAssertTrue(CGImageDestinationFinalize(sink))
         let url = dir.appendingPathComponent("depth.jpg")
         try (out as Data).write(to: url)
-        XCTAssertTrue(try facts(url).hasAuxiliaryData)
+        XCTAssertEqual(try facts(url).auxiliaryData, [.disparity])
     }
 
     func testALivePhotoStillIsRecognizedByItsAppleContentIdentifier() throws {
@@ -41,11 +41,13 @@ final class ImageProbeTests: TempDirTestCase {
         let url = try TestImages.write(TestImages.photo(), as: "public.jpeg", to: dir.appendingPathComponent("live.jpg"), properties: [kCGImagePropertyMakerAppleDictionary: apple])
         // ImageIO may or may not keep a MakerApple dictionary it was given; only assert what it keeps.
         if TestImages.properties(of: url)[kCGImagePropertyMakerAppleDictionary] != nil {
-            XCTAssertTrue(try facts(url).hasAuxiliaryData)
+            XCTAssertEqual(try facts(url).auxiliaryData, [.livePhoto])
         }
-        XCTAssertTrue(ImageIOProbe.isLivePhoto(properties: [kCGImagePropertyMakerAppleDictionary: apple]))
-        XCTAssertFalse(ImageIOProbe.isLivePhoto(properties: [kCGImagePropertyMakerAppleDictionary: ["1": 1]]))
-        XCTAssertFalse(ImageIOProbe.isLivePhoto(properties: [:]))
+        XCTAssertEqual(ImageIOProbe.livePhotoIdentifier(in: [kCGImagePropertyMakerAppleDictionary: apple]), "AB12CD34-0000-0000-0000-000000000000")
+        XCTAssertNil(ImageIOProbe.livePhotoIdentifier(in: [kCGImagePropertyMakerAppleDictionary: ["1": 1]]), "other Apple tags are not a Live Photo")
+        XCTAssertNil(ImageIOProbe.livePhotoIdentifier(in: [kCGImagePropertyMakerAppleDictionary: ["17": ""]]), "an empty identifier pairs with nothing")
+        XCTAssertNil(ImageIOProbe.livePhotoIdentifier(in: [kCGImagePropertyMakerAppleDictionary: ["17": 5]]), "only a text identifier counts")
+        XCTAssertNil(ImageIOProbe.livePhotoIdentifier(in: [:]))
     }
 
     func testAnAnimatedGIFIsAnimatedAndAStillPNGIsNot() throws {
