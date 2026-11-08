@@ -1,0 +1,41 @@
+# Build artifacts
+build/
+dist/
+.build/
+DerivedData/
+*.dmg
+*.app
+*.zip
+
+# Signing and notarization: never commit private keys or credentials
+*.p12
+*.pem
+*.cer
+*.p8
+*.key
+*.mobileprovision
+*.provisionprofile
+*.keychain-db
+.env
+.env.*
+
+# Xcode / SwiftPM user state
+# (*.xcodeproj is generated from Package.swift or project.yml; remove this line if you commit a hand-made Xcode project)
+*.xcodeproj
+*.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcuserstate
+.swiftpm/
+
+# Claude Code / agent files: local-only
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.claude/
+
+# macOS noise
+.DS_Store
+.AppleDouble
+.LSOverride
+# Editor state
+.vscode/
