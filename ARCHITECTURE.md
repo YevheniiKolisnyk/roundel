@@ -24,6 +24,10 @@ A short map of the parts that are not obvious from the folder names. `CLAUDE.md`
   scored by `min(luma SSIM, mean RGB SSIM) >= 0.88`, then one full encode. This deliberately replaces the earlier "no SSIM at run
   time" rule, because a fixed quality has to suit the most textured picture. Deterministic (whole-percent grid, fixed bisection),
   hard floors per format, a per-file time budget (20 s) that falls back to the fixed Strong number. Light and Balanced stay fixed.
+- **Reduced-color PNG** (`PNGColorReducer`, `PNGQuantizer`, `PNGLossyGuard`; Strong only): after the lossless optimizer, a median-cut palette
+  (with Floyd-Steinberg dithering as a second try) of 256/64/16 colors is built and judged **as it would be written** (decoded again):
+  luma SSIM >= 0.98, each RGB SSIM >= 0.97, alpha change <= 8, no banding in smooth gradient blocks, fewer than 8193 sampled colors, <= 24 MP,
+  and >= 30% smaller than the lossless result; otherwise the lossless file is kept. `PNGVerifier` guards the lossless path.
 - **Test tools:** `TestPNG` (an independent PNG writer and reader) and `TestImages` (generated pictures, SSIM, PSNR) live in
   the test target; the compression presets are held to similarity floors there, not at run time.
 

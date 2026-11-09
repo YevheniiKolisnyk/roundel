@@ -70,8 +70,9 @@ public final class ImageCompressor: ImageCompressing, Sendable {
         }
 
         let slot = await placer.reserve(for: source, fileExtension: CompressionPlan.outputExtension(detectedType: type, source: source))
+        var reducedToColors: Int?
         do {
-            try produce(decision, from: source, to: slot.temporary)
+            reducedToColors = try produce(decision, from: source, to: slot.temporary, stripMetadata: options.stripsMetadata)
         } catch is NothingToKeep {
             // The optimizer's own safety net refused its result: the original stays, nothing is written, and the user is not
             // bothered with an internal problem.
@@ -92,7 +93,8 @@ public final class ImageCompressor: ImageCompressing, Sendable {
             try? FileManager.default.removeItem(at: slot.temporary)
             return .failed(source: source, message: "the compressor produced no output")
         }
-        let changes = CompressionChanges(metadataRemoved: options.stripsMetadata, extrasRemoved: facts.auxiliaryData)   // a file with extras only gets here if they were allowed to go
+        let changes = CompressionChanges(metadataRemoved: options.stripsMetadata, extrasRemoved: facts.auxiliaryData,   // a file with extras only gets here if they were allowed to go
+                                    reducedToColors: reducedToColors)
         // Not worth keeping unless it saves enough.
         guard Double(after) <= Double(before) * (1 - Self.minimumSaving) else {
             try? FileManager.default.removeItem(at: slot.temporary)
@@ -110,16 +112,25 @@ public final class ImageCompressor: ImageCompressing, Sendable {
     private struct NothingToKeep: Error {}
 
     /// Writes the compressed version to `temporary`.
-    private func produce(_ decision: CompressionDecision, from source: URL, to temporary: URL) throws {
+    /// - Returns: for a PNG that was reduced to a palette, its number of colors.
+    @discardableResult
+    private func produce(_ decision: CompressionDecision, from source: URL, to temporary: URL, stripMetadata: Bool) throws -> Int? {
         switch decision {
         case .reencode(let format, let options):
             _ = try encoder.encode(source: source, to: temporary, format: format, options: options)
         case .reencodeAdaptive(let format, let options, let range):
             try encodeAdaptively(source: source, to: temporary, format: format, options: options, range: range)
-        case .optimizePNG(let options, _):
+        case .optimizePNG(let options, let reduceColors):
             let data = try Data(contentsOf: source)
             do {
-                try pngOptimizer(data, options).write(to: temporary)
+                let optimized = try pngOptimizer(data, options)
+                // Strong: a reduced palette, if it is clearly smaller and passes every guard (see PNGColorReducer); else the lossless file.
+                if reduceColors, let reduced = PNGColorReducer.reduce(source: data, lossless: optimized, stripMetadata: options.stripMetadata).result {
+                    try reduced.data.write(to: temporary)
+                    return reduced.colors
+                }
+                try optimized.write(to: temporary)
+                return nil
             } catch let error as PNGOptimizeError {
                 switch error {
                 case .interlaced: throw SkipRequest(reason: .interlacedPNG)
@@ -133,6 +144,7 @@ public final class ImageCompressor: ImageCompressing, Sendable {
         case .skip, .alreadyOptimal:
             break
         }
+        return nil
     }
 
     private static func fileSize(_ url: URL) -> Int {

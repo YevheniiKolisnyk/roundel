@@ -128,4 +128,64 @@ final class StrongPresetTests: TempDirTestCase {
         XCTAssertEqual(TestPNG.chunks(of: try Data(contentsOf: strong.output)).map(\.type), ["IHDR", "iCCP", "gAMA", "IDAT", "IEND"])
         XCTAssertTrue(strong.changes.metadataRemoved)
     }
+
+    // MARK: PNG: the lossy step
+
+    /// Anti-aliased text with colored fringes on flat panels: thousands of colors, but flat graphics.
+    private func uiPNG(_ name: String) throws -> URL {
+        var noise = TestNoise(state: 17)
+        var fringe: [Int: [Int]] = [:]
+        func edge(_ key: Int) -> [Int] {
+            if let c = fringe[key] { return c }
+            let t = (0..<3).map { _ in (noise.next() % 11) * 10 }
+            let c = (0..<3).map { 246 - (246 - 40) * t[$0] / 100 }
+            fringe[key] = c
+            return c
+        }
+        let url = dir.appendingPathComponent(name)
+        try TestPNG.make(.init(width: 320, height: 200, colorType: 6, bitDepth: 8, sample: { (x: Int, y: Int, c: Int) -> Int in
+            var px: [Int] = [246, 246, 248, 255]
+            if y < 28 { px = [226, 226, 230, 255] }
+            if x >= 90 && x < 280 && (y % 12) < 8 && y > 40 {
+                let k = (x * 31 + (y / 12) * 17) % 7
+                px = k < 4 ? [40, 40, 46, 255] : (k < 6 ? edge(x * 1000 + y) + [255] : [246, 246, 248, 255])
+            }
+            return px[c]
+        }, chunks: [("tEXt", Array("Comment\0hi".utf8))])).write(to: url)
+        return url
+    }
+
+    func testStrongReducesAFlatScreenshotToAPaletteAndSaysSo() async throws {
+        let url = try uiPNG("ui.png")
+        let original = try Data(contentsOf: url)
+        let (output, changes) = try await compress(url, CompressionOptions(preset: .strong))
+        let file = try PNGFile.parse(try Data(contentsOf: output))
+        XCTAssertEqual(file.header.colorType, 3)
+        XCTAssertNotNil(changes.reducedToColors)
+        XCTAssertLessThanOrEqual(changes.reducedToColors ?? 999, 256)
+        XCTAssertTrue(changes.metadataRemoved)
+        XCTAssertEqual(try Data(contentsOf: url), original, "the original is untouched")
+        let message = CompressionSummary(results: [.compressed(source: url, output: output, bytesBefore: 1, bytesAfter: 0, changes: changes)]).message
+        XCTAssertTrue(message.contains("colors reduced in 1 PNG"), message)
+    }
+
+    func testBalancedKeepsEveryPixelAndAnExplicitFalseOnStrongDoesToo() async throws {
+        let url = try uiPNG("ui2.png")
+        let pixels = try XCTUnwrap(PNGPixels.rgba8(try PNGFile.parse(try Data(contentsOf: url))))
+        for options in [CompressionOptions(preset: .balanced), CompressionOptions(preset: .strong, reducePNGColors: false)] {
+            let (output, changes) = try await compress(url, options)
+            XCTAssertNil(changes.reducedToColors)
+            XCTAssertEqual(PNGPixels.rgba8(try PNGFile.parse(try Data(contentsOf: output))), pixels, "lossless: the same pixels")
+            try FileManager.default.removeItem(at: output)
+        }
+    }
+
+    func testStrongLeavesAPhotographicPNGLossless() async throws {
+        let url = dir.appendingPathComponent("photo.png")
+        try TestImages.write(TestImages.photo(width: 200, height: 150, grain: 6), as: "public.png", to: url)
+        let pixels = try XCTUnwrap(PNGPixels.rgba8(try PNGFile.parse(try Data(contentsOf: url))))
+        let (output, changes) = try await compress(url, CompressionOptions(preset: .strong))
+        XCTAssertNil(changes.reducedToColors)
+        XCTAssertEqual(PNGPixels.rgba8(try PNGFile.parse(try Data(contentsOf: output))), pixels)
+    }
 }

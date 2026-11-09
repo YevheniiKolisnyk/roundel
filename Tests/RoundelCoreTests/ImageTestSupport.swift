@@ -44,6 +44,15 @@ enum TestImages {
         return url
     }
 
+    /// A PNG file's bytes for `image` (as ImageIO writes it).
+    static func pngData(_ image: CGImage) throws -> Data {
+        let data = NSMutableData()
+        let sink = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(sink, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(sink))
+        return data as Data
+    }
+
     static func load(_ url: URL) throws -> CGImage {
         try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }, "reading \(url.lastPathComponent)")
     }

@@ -14,28 +14,53 @@ public enum ImagePixels {
 }
 
 /// How alike two pictures of the same size look: structural similarity (SSIM, 8x8 windows every 4 pixels) of the luminance and
-/// of each color channel. Computed with summed-area tables, so a megapixel takes milliseconds.
+/// of each color channel. Computed with summed-area tables, so a megapixel takes milliseconds; pictures bigger than `bandPixels`
+/// are scored in horizontal bands so the tables stay small.
 public enum ImageMetrics {
+    public static let defaultBandPixels = 4_000_000
+
     /// `min(luma SSIM, mean of the R, G and B SSIMs)`: 1 is identical. The luma alone does not see color shifts; the mean alone
     /// can hide a loss of structure. 0 if the buffers do not match the size.
-    public static func similarity(_ a: [UInt8], _ b: [UInt8], width: Int, height: Int) -> Double {
+    public static func similarity(_ a: [UInt8], _ b: [UInt8], width: Int, height: Int, bandPixels: Int = ImageMetrics.defaultBandPixels) -> Double {
         if width <= 0 || height <= 0 { return 1 }
         guard a.count == width * height * 4, b.count == a.count else { return 0 }
-        let luma = lumaSSIM(a, b, width: width, height: height)
-        let channels = (0..<3).map { channelSSIM(a, b, width: width, height: height, channel: $0) }
+        let luma = lumaSSIM(a, b, width: width, height: height, bandPixels: bandPixels)
+        let channels = (0..<3).map { channelSSIM(a, b, width: width, height: height, channel: $0, bandPixels: bandPixels) }
         return min(luma, channels.reduce(0, +) / 3)
     }
 
-    public static func lumaSSIM(_ a: [UInt8], _ b: [UInt8], width: Int, height: Int) -> Double {
+    public static func lumaSSIM(_ a: [UInt8], _ b: [UInt8], width: Int, height: Int, bandPixels: Int = ImageMetrics.defaultBandPixels) -> Double {
         guard width > 0, height > 0 else { return 1 }
         guard a.count == width * height * 4, b.count == a.count else { return 0 }
-        return ssim(plane(a, count: width * height, channel: nil), plane(b, count: width * height, channel: nil), width: width, height: height)
+        return banded(a, b, width: width, height: height, bandPixels: bandPixels, channel: nil)
     }
 
-    public static func channelSSIM(_ a: [UInt8], _ b: [UInt8], width: Int, height: Int, channel: Int) -> Double {
+    public static func channelSSIM(_ a: [UInt8], _ b: [UInt8], width: Int, height: Int, channel: Int, bandPixels: Int = ImageMetrics.defaultBandPixels) -> Double {
         guard width > 0, height > 0 else { return 1 }
         guard a.count == width * height * 4, b.count == a.count, (0..<3).contains(channel) else { return 0 }
-        return ssim(plane(a, count: width * height, channel: channel), plane(b, count: width * height, channel: channel), width: width, height: height)
+        return banded(a, b, width: width, height: height, bandPixels: bandPixels, channel: channel)
+    }
+
+    /// The score over the whole picture, or the average of the scores of its bands weighted by their height.
+    private static func banded(_ a: [UInt8], _ b: [UInt8], width: Int, height: Int, bandPixels: Int, channel: Int?) -> Double {
+        let rowsPerBand = max(16, bandPixels / max(width, 1))
+        if height <= rowsPerBand {
+            return ssim(plane(a, count: width * height, channel: channel), plane(b, count: width * height, channel: channel), width: width, height: height)
+        }
+        var total = 0.0
+        var counted = 0
+        var y = 0
+        while y < height {
+            let rows = min(rowsPerBand, height - y)
+            if rows >= 8 || y == 0 {
+                let range = (y * width * 4)..<((y + rows) * width * 4)
+                let score = ssim(plane(Array(a[range]), count: width * rows, channel: channel), plane(Array(b[range]), count: width * rows, channel: channel), width: width, height: rows)
+                total += score * Double(rows)
+                counted += rows
+            }
+            y += rows
+        }
+        return counted == 0 ? 1 : total / Double(counted)
     }
 
     private static func plane(_ rgba: [UInt8], count: Int, channel: Int?) -> [Double] {

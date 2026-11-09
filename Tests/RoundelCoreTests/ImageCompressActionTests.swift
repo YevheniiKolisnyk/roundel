@@ -146,7 +146,7 @@ final class ImageCompressActionTests: XCTestCase {
         XCTAssertNil(Params(compress.params).bool("stripMetadata"), "an explicit false here would stop Strong from stripping")
         XCTAssertNil(Params(compress.params).bool("dropHDRData"))
         XCTAssertNil(Params(compress.params).bool("reducePNGColors"))
-        for needle in ["image.compress", "stripMetadata", "dropHDRData", "reducePNGColors", "gain map", "set dropHDRData to compress anyway", "maxDimension", "already optimal", "XMP", "MakerNote", "metadata removed", "wins over the preset", "GPS", "orientation", "at least 2%", "compressed"] {
+        for needle in ["image.compress", "stripMetadata", "dropHDRData", "reducePNGColors", "256 colors", "gain map", "set dropHDRData to compress anyway", "maxDimension", "already optimal", "XMP", "MakerNote", "metadata removed", "wins over the preset", "GPS", "orientation", "at least 2%", "compressed"] {
             XCTAssertTrue(DefaultConfig.exampleJSON.contains(needle), "the example config explains: \(needle)")
         }
     }

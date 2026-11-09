@@ -88,7 +88,7 @@ enum PNGVerifier {
 
     // MARK: Expanding a row to 16-bit RGBA
 
-    private struct Palette {
+    struct Palette {
         var rgb: [UInt8]
         var trns: [UInt8]
         init(_ file: PNGFile) {
@@ -97,7 +97,7 @@ enum PNGVerifier {
         }
     }
 
-    private static func expand(_ row: [UInt8], header h: PNGHeader, palette: Palette, into out: inout [UInt16]) {
+    static func expand(_ row: [UInt8], header h: PNGHeader, palette: Palette, into out: inout [UInt16]) {
         let depth = h.bitDepth
         let maxValue = (1 << depth) - 1
         func sample(_ index: Int) -> Int {
