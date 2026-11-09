@@ -93,6 +93,7 @@ public enum ImageInspector {
     private static func describe(_ decision: CompressionDecision) -> String {
         switch decision {
         case .reencode(let format, let o): "re-encode (\(format.displayName)\(o.quality.map { ", quality \(String(format: "%.2f", $0))" } ?? "")\(o.lossless ? ", lossless" : ""))"
+        case .reencodeAdaptive(let format, _, let range): "re-encode (\(format.displayName), quality searched in \(range.lowerBound)-\(range.upperBound)% for a similarity of \(AdaptiveSearch.target))"
         case .optimizePNG(_, let reduce): reduce ? "optimize the PNG (lossless, then a reduced-color attempt)" : "optimize the PNG losslessly"
         case .skip(let reason): "SKIP: \(reason.message)"
         case .alreadyOptimal: "do nothing (already optimal)"

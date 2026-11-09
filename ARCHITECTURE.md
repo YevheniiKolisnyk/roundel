@@ -20,6 +20,10 @@ A short map of the parts that are not obvious from the folder names. `CLAUDE.md`
 - **Extras a re-encode would drop** (HDR gain map, depth/disparity, mattes, a Live Photo link; not MPF previews) make JPEG/HEIC
   files skip unless `dropHDRData` is set. `swift run image-inspect <file>` is a read-only diagnostic that prints what a file holds,
   its MPF index, and which of it Compress counts.
+- **Strong's quality search** (`AdaptiveSearch`, `ImageMetrics`): for lossy JPEG/HEIC/WebP, up to five trial encodes of a ~1 MP crop,
+  scored by `min(luma SSIM, mean RGB SSIM) >= 0.88`, then one full encode. This deliberately replaces the earlier "no SSIM at run
+  time" rule, because a fixed quality has to suit the most textured picture. Deterministic (whole-percent grid, fixed bisection),
+  hard floors per format, a per-file time budget (20 s) that falls back to the fixed Strong number. Light and Balanced stay fixed.
 - **Test tools:** `TestPNG` (an independent PNG writer and reader) and `TestImages` (generated pictures, SSIM, PSNR) live in
   the test target; the compression presets are held to similarity floors there, not at run time.
 

@@ -19,13 +19,13 @@ final class WebPCompressionTests: XCTestCase {
 
     // MARK: Pictures
 
-    private func picture(width: Int = 400, height: Int = 300) throws -> CGImage {
+    private func picture(width: Int = 400, height: Int = 300, grainShift: UInt32 = 28) throws -> CGImage {
         var state: UInt32 = 21
         var bytes = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height {
             for x in 0..<width {
                 state = state &* 1_664_525 &+ 1_013_904_223
-                let n = Int(state >> 28) - 8
+                let n = Int(state >> grainShift) - (1 << (32 - Int(grainShift)) / 2)
                 let fx = Double(x) / Double(width), fy = Double(y) / Double(height)
                 let r = 120 + 90 * sin(fx * 5 + fy * 2), g = 130 + 80 * cos(fx * 3 - fy * 4), b = 140 + 70 * sin(fx * 2 + fy * 6)
                 let i = (y * width + x) * 4
@@ -143,5 +143,35 @@ final class WebPCompressionTests: XCTestCase {
         let results = await compressor.compress(files: [url], options: CompressionOptions(), progress: { _, _ in })
         guard case .failed? = results.first else { return XCTFail("\(results)") }
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["junk.webp"])
+    }
+
+    func testStrongSearchesTheWebPQualityPerFileWithinItsRangeAndHoldsTheTarget() async throws {
+        final class Counting: ImageEncoder, @unchecked Sendable {
+            let inner: ImageBackends
+            private let lock = NSLock()
+            private var _qualities: [Double?] = []
+            var qualities: [Double?] { lock.withLock { _qualities } }
+            init(_ inner: ImageBackends) { self.inner = inner }
+            func detectType(of url: URL) -> String? { inner.detectType(of: url) }
+            func encode(source: URL, to destination: URL, format: ImageFormat, options: ImageEncodingOptions) throws -> EncodeOutcome {
+                lock.withLock { _qualities.append(options.quality) }
+                return try inner.encode(source: source, to: destination, format: format, options: options)
+            }
+        }
+        let png = try writePNG(try picture(width: 480, height: 360, grainShift: 30), "src.png")   // gentle grain: a real photo, not static
+        let source = try makeWebP(from: png, named: "photo.webp", quality: 0.95, lossless: false)
+        let encoder = Counting(backends)
+        let results = await ImageCompressor(encoder: encoder).compress(files: [source], options: CompressionOptions(preset: .strong), progress: { _, _ in })
+        guard case .compressed(_, let output, let before, let after, _)? = results.first else { return XCTFail("\(results)") }
+        XCTAssertLessThan(after, before)
+        let qualities = encoder.qualities.compactMap { $0 }
+        XCTAssertLessThanOrEqual(qualities.count, 6)
+        XCTAssertTrue(qualities.allSatisfy { $0 >= 0.30 - 1e-9 && $0 <= 0.70 + 1e-9 }, "\(qualities): never below the WebP floor of 30")
+        func rgba(_ u: URL) throws -> [UInt8] {
+            let image = try XCTUnwrap(CGImageSourceCreateWithURL(u as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+            return ImagePixels.rgba8(image)
+        }
+        let score = ImageMetrics.similarity(try rgba(source), try rgba(output), width: 480, height: 360)
+        XCTAssertGreaterThanOrEqual(score, 0.86)
     }
 }

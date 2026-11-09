@@ -74,6 +74,9 @@ public enum CompressionSkipReason: Equatable, Sendable {
 public enum CompressionDecision: Equatable, Sendable {
     /// Encode again in the same format with these options.
     case reencode(format: ImageFormat, options: ImageEncodingOptions)
+    /// Strong: find the lowest quality in `range` (whole percent) that still looks the same (`AdaptiveSearch`), then encode with it.
+    /// `options.quality` is the fixed fallback for when the search cannot run.
+    case reencodeAdaptive(format: ImageFormat, options: ImageEncodingOptions, range: ClosedRange<Int>)
     /// `reduceColors`: a lossy palette may be tried after the lossless optimization (Strong).
     case optimizePNG(PNGOptimizer.Options, reduceColors: Bool)
     case skip(CompressionSkipReason)
@@ -93,19 +96,28 @@ public enum CompressionPlan {
         case "public.jpeg":
             if facts.hasAuxiliaryData, !options.dropsHDRData { return .skip(.hasAuxiliaryData(facts.auxiliaryData)) }
             var quality = options.quality ?? options.preset.jpegQuality
+            var capPercent: Int?
             if options.quality == nil, let source = facts.jpegQualityIJG {
                 if let cap = JPEGQuality.cap(forSourceIJG: source) {
                     quality = min(quality, cap)
+                    capPercent = Int((cap * 100).rounded(.down))
                 } else if options.maxDimension == nil {
                     return .alreadyOptimal
                 } else {
                     quality = JPEGQuality.imageIO(forIJG: Double(source))   // only the size changes
+                    capPercent = Int((quality * 100).rounded(.down))
                 }
+            }
+            if options.preset == .strong, options.quality == nil {
+                return reencodeAdaptive("jpeg", options, quality: quality, range: AdaptiveSearch.range(forJPEG: capPercent))
             }
             return reencode("jpeg", options, quality: quality)
 
         case "public.heic":
             if facts.hasAuxiliaryData, !options.dropsHDRData { return .skip(.hasAuxiliaryData(facts.auxiliaryData)) }
+            if options.preset == .strong, options.quality == nil {
+                return reencodeAdaptive("heic", options, quality: options.preset.heicQuality, range: AdaptiveSearch.heicRange)
+            }
             return reencode("heic", options, quality: options.quality ?? options.preset.heicQuality)
 
         case "org.webmproject.webp":
@@ -114,6 +126,9 @@ public enum CompressionPlan {
                 // Stays lossless, whatever the preset: the same pixels, as small as the encoder can make them.
                 return reencode("webp", options, quality: 1.0, lossless: true)
             case false?:
+                if options.preset == .strong, options.quality == nil {
+                    return reencodeAdaptive("webp", options, quality: options.preset.webpQuality, range: AdaptiveSearch.webpRange)
+                }
                 return reencode("webp", options, quality: options.quality ?? options.preset.webpQuality)
             case nil:
                 return .skip(.unsupported("WebP"))
@@ -131,6 +146,11 @@ public enum CompressionPlan {
         guard let format = ImageFormats.format(forKey: key) else { return .skip(.unsupported(key)) }
         return .reencode(format: format, options: ImageEncodingOptions(quality: quality, lossless: lossless, maxDimension: options.maxDimension,
                                                                          stripMetadata: options.stripsMetadata, thorough: true, carryXMP: !options.stripsMetadata))
+    }
+
+    private static func reencodeAdaptive(_ key: String, _ options: CompressionOptions, quality: Double, range: ClosedRange<Int>) -> CompressionDecision {
+        guard case .reencode(let format, let encoding) = reencode(key, options, quality: quality) else { return .skip(.unsupported(key)) }
+        return .reencodeAdaptive(format: format, options: encoding, range: range)
     }
 
     /// The file extension of the output: the source's own if it is right for the content, else the content's usual one.

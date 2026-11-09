@@ -51,6 +51,38 @@ final class CompressionPlanTests: XCTestCase {
 
     // MARK: JPEG
 
+    // MARK: Strong searches per file
+
+    func testStrongSearchesForTheLowestQualityThatStillLooksTheSame() {
+        guard case .reencodeAdaptive(let jpeg, let o, let range) = decide(facts("public.jpeg", ijg: 96), options(.strong)) else { return XCTFail("adaptive") }
+        XCTAssertEqual(jpeg.key, "jpeg"); XCTAssertEqual(range, 30...55)
+        XCTAssertEqual(o.quality, 0.35, "the fixed fallback")
+        XCTAssertTrue(o.stripMetadata)
+        guard case .reencodeAdaptive(_, let h, let heic) = decide(facts("public.heic"), options(.strong)) else { return XCTFail() }
+        XCTAssertEqual(heic, 20...55); XCTAssertEqual(h.quality, 0.25)
+        guard case .reencodeAdaptive(_, let w, let webp) = decide(facts("org.webmproject.webp", webpLossless: false), options(.strong)) else { return XCTFail() }
+        XCTAssertEqual(webp, 30...70); XCTAssertEqual(w.quality, 0.60)
+    }
+
+    func testTheSearchRangeOfAJPEGEndsAtWhatItsOwnQualityAllows() throws {
+        guard case .reencodeAdaptive(_, _, let range) = decide(facts("public.jpeg", ijg: 80), options(.strong)) else { return XCTFail() }
+        XCTAssertEqual(range.lowerBound, 30)
+        let cap = try XCTUnwrap(JPEGQuality.cap(forSourceIJG: 80))
+        XCTAssertEqual(range.upperBound, Int((cap * 100).rounded(.down)))
+        XCTAssertLessThan(range.upperBound, 55)
+        XCTAssertEqual(decide(facts("public.jpeg", ijg: 45), options(.strong)), .alreadyOptimal)
+    }
+
+    func testOnlyStrongSearchesAndAnExplicitQualityOrALosslessFileDoesNot() {
+        for preset in [CompressionPreset.light, .balanced] {
+            guard case .reencode = decide(facts("public.jpeg", ijg: 96), options(preset)) else { return XCTFail("\(preset) is fixed") }
+        }
+        guard case .reencode(_, let o) = decide(facts("public.jpeg", ijg: 96), options(.strong, quality: 0.5)) else { return XCTFail("an explicit quality is used as given") }
+        XCTAssertEqual(o.quality, 0.5)
+        guard case .reencode(_, let lossless) = decide(facts("org.webmproject.webp", webpLossless: true), options(.strong)) else { return XCTFail("lossless is not searched") }
+        XCTAssertTrue(lossless.lossless)
+    }
+
     func testJPEGUsesThePresetQualityWhenTheSourceHasRoom() {
         guard case .reencode(let format, let o) = decide(facts("public.jpeg", ijg: 96), options(.balanced)) else { return XCTFail("re-encode") }
         XCTAssertEqual(format.key, "jpeg")
@@ -65,8 +97,8 @@ final class CompressionPlanTests: XCTestCase {
         XCTAssertLessThan(quality, 0.70)
         XCTAssertLessThanOrEqual(JPEGQuality.ijg(forImageIO: quality), 80 - 4 + 0.5, "four IJG points below the source")
         // A preset that is already lower than the cap is left alone.
-        guard case .reencode(_, let strong) = decide(facts("public.jpeg", ijg: 96), options(.strong)) else { return XCTFail("re-encode") }
-        XCTAssertEqual(strong.quality, 0.35)
+        guard case .reencodeAdaptive(_, let strong, _) = decide(facts("public.jpeg", ijg: 96), options(.strong)) else { return XCTFail("Strong searches") }
+        XCTAssertEqual(strong.quality, 0.35, "its fixed fallback")
     }
 
     func testAJPEGThatIsAlreadyHeavilyCompressedIsAlreadyOptimal() {
@@ -95,7 +127,13 @@ final class CompressionPlanTests: XCTestCase {
 
     func testHEICUsesItsOwnQualities() {
         for preset in CompressionPreset.allCases {
-            guard case .reencode(let format, let o) = decide(facts("public.heic"), options(preset)) else { return XCTFail("re-encode") }
+            let decision = decide(facts("public.heic"), options(preset))
+            let pair: (ImageFormat, ImageEncodingOptions)
+            switch decision {
+            case .reencode(let f, let o), .reencodeAdaptive(let f, let o, _): pair = (f, o)
+            default: return XCTFail("re-encode")
+            }
+            let (format, o) = pair
             XCTAssertEqual(format.key, "heic")
             XCTAssertEqual(o.quality, preset.heicQuality)
         }
@@ -142,7 +180,7 @@ final class CompressionPlanTests: XCTestCase {
     }
 
     func testStrongReEncodesFilesWithExtrasAndStripsButLightSkipsThem() {
-        guard case .reencode(_, let strong) = decide(facts("public.jpeg", aux: [.hdrGainMap, .livePhoto], ijg: 95), options(.strong)) else { return XCTFail("Strong implies dropHDRData") }
+        guard case .reencodeAdaptive(_, let strong, _) = decide(facts("public.jpeg", aux: [.hdrGainMap, .livePhoto], ijg: 95), options(.strong)) else { return XCTFail("Strong implies dropHDRData") }
         XCTAssertTrue(strong.stripMetadata)
         XCTAssertFalse(strong.carryXMP)
         XCTAssertEqual(decide(facts("public.jpeg", aux: [.hdrGainMap], ijg: 95), options(.light)), .skip(.hasAuxiliaryData([.hdrGainMap])))
