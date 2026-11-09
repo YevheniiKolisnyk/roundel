@@ -88,4 +88,26 @@ final class ImageResizeStripTests: TempDirTestCase {
         XCTAssertNotNil(TestImages.properties(of: out)[kCGImagePropertyGPSDictionary])
         XCTAssertEqual(TestImages.properties(of: out)[kCGImagePropertyPixelWidth] as? Int, 300)
     }
+
+    func testStrippingWinsOverCarryingXMP() throws {
+        let xmp = CGImageMetadataCreateMutable()
+        XCTAssertTrue(CGImageMetadataSetValueWithPath(xmp, nil, "xmp:Label" as CFString, "Blue" as CFString))
+        let url = dir.appendingPathComponent("x.jpg")
+        let sink = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImageAndMetadata(sink, TestImages.photo(width: 120, height: 80), xmp, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(sink))
+        func label(_ u: URL) -> String? {
+            guard let s = CGImageSourceCreateWithURL(u as CFURL, nil), let md = CGImageSourceCopyMetadataAtIndex(s, 0, nil),
+                  let tag = CGImageMetadataCopyTagWithPath(md, nil, "xmp:Label" as CFString) else { return nil }
+            return CGImageMetadataTagCopyValue(tag) as? String
+        }
+        XCTAssertEqual(label(url), "Blue", "precondition")
+        let carried = dir.appendingPathComponent("carried.jpg"), stripped = dir.appendingPathComponent("stripped.jpg"), plain = dir.appendingPathComponent("plain.jpg")
+        _ = try encoder.encode(source: url, to: carried, format: jpeg, options: ImageEncodingOptions(quality: 0.7, carryXMP: true))
+        _ = try encoder.encode(source: url, to: stripped, format: jpeg, options: ImageEncodingOptions(quality: 0.7, stripMetadata: true, carryXMP: true))
+        _ = try encoder.encode(source: url, to: plain, format: jpeg, options: ImageEncodingOptions(quality: 0.7))
+        XCTAssertEqual(label(carried), "Blue")
+        XCTAssertNil(label(stripped), "strip wins even if carrying was asked for")
+        XCTAssertNil(label(plain), "and nothing is carried unless asked (Convert is unchanged)")
+    }
 }

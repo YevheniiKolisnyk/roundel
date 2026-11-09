@@ -3,9 +3,9 @@ import XCTest
 
 final class CompressionSummaryTests: XCTestCase {
     private func url(_ name: String) -> URL { URL(fileURLWithPath: "/tmp/pics/\(name)") }
-    private func done(_ name: String, before: Int, after: Int) -> CompressionItemResult {
+    private func done(_ name: String, before: Int, after: Int, changes: CompressionChanges = CompressionChanges()) -> CompressionItemResult {
         let stem = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
-        return .compressed(source: url(name), output: url("\(stem) compressed.\(ext)"), bytesBefore: before, bytesAfter: after)
+        return .compressed(source: url(name), output: url("\(stem) compressed.\(ext)"), bytesBefore: before, bytesAfter: after, changes: changes)
     }
     private func summary(_ results: [CompressionItemResult]) -> CompressionSummary { CompressionSummary(results: results) }
 
@@ -17,6 +17,32 @@ final class CompressionSummaryTests: XCTestCase {
     func testOneFileNamesItsOutput() {
         XCTAssertEqual(summary([done("photo.jpg", before: 2_000_000, after: 1_000_000)]).message,
                        "Compressed photo.jpg → photo compressed.jpg, saved 50% (2.0 MB → 1.0 MB)")
+    }
+
+    func testWhatWasRemovedIsToldRightAfterTheSavings() {
+        let stripped = CompressionChanges(metadataRemoved: true)
+        let three = (1...3).map { done("p\($0).jpg", before: 3_000_000, after: 870_000, changes: stripped) }
+        XCTAssertEqual(summary(three).message, "Compressed 3 files, saved 71% (9.0 MB → 2.6 MB) · metadata removed")
+        XCTAssertEqual(summary([done("a.jpg", before: 2_000_000, after: 1_000_000, changes: stripped)]).message,
+                       "Compressed a.jpg → a compressed.jpg, saved 50% (2.0 MB → 1.0 MB) · metadata removed")
+    }
+
+    func testRemovedExtrasAndReducedColorsAreCounted() {
+        let results = [done("a.jpg", before: 1_000_000, after: 500_000, changes: CompressionChanges(metadataRemoved: true, extrasRemoved: [.hdrGainMap, .depth])),
+                       done("b.jpg", before: 1_000_000, after: 500_000, changes: CompressionChanges(metadataRemoved: true, extrasRemoved: [.livePhoto])),
+                       done("c.png", before: 1_000_000, after: 300_000, changes: CompressionChanges(metadataRemoved: true, reducedToColors: 64)),
+                       done("d.png", before: 1_000_000, after: 300_000)]
+        let text = summary(results).message
+        XCTAssertTrue(text.contains(" · metadata removed"), text)
+        XCTAssertTrue(text.contains(" · HDR, depth or Live Photo data removed (2 files)"), text)
+        XCTAssertTrue(text.contains(" · colors reduced in 1 PNG"), text)
+        XCTAssertEqual(summary([done("a.jpg", before: 100, after: 50), done("b.jpg", before: 100, after: 50, changes: CompressionChanges(metadataRemoved: true))]).message.contains("metadata removed"), true, "even if only some files had it removed")
+    }
+
+    func testNothingIsClaimedWhenNothingWasRemoved() {
+        let text = summary([done("a.jpg", before: 100, after: 50)]).message
+        XCTAssertFalse(text.contains("removed"), text)
+        XCTAssertFalse(text.contains("reduced"), text)
     }
 
     func testTotalsCountOnlyWhatWasCompressed() {

@@ -78,7 +78,7 @@ final class WebPCompressionTests: XCTestCase {
         let source = try makeWebP(from: png, named: "photo.webp", quality: 0.95, lossless: false)
         XCTAssertEqual(WebPContainer.kind(of: try Data(contentsOf: source)), .lossy)
         let results = await compressor.compress(files: [source], options: CompressionOptions(preset: .balanced), progress: { _, _ in })
-        guard case .compressed(_, let output, let before, let after)? = results.first else { return XCTFail("\(results)") }
+        guard case .compressed(_, let output, let before, let after, _)? = results.first else { return XCTFail("\(results)") }
         XCTAssertEqual(output.lastPathComponent, "photo compressed.webp")
         XCTAssertLessThan(after, before)
         XCTAssertEqual(WebPContainer.kind(of: try Data(contentsOf: output)), .lossy)
@@ -94,7 +94,7 @@ final class WebPCompressionTests: XCTestCase {
         XCTAssertEqual(WebPContainer.kind(of: try Data(contentsOf: source)), .lossless)
         let results = await compressor.compress(files: [source], options: CompressionOptions(preset: .strong), progress: { _, _ in })
         switch results.first {
-        case .compressed(_, let output, let before, let after)?:
+        case .compressed(_, let output, let before, let after, _)?:
             XCTAssertLessThan(after, before)
             XCTAssertEqual(WebPContainer.kind(of: try Data(contentsOf: output)), .lossless, "never silently becomes lossy")
             XCTAssertEqual(try pixels(output), try pixels(source), "the same pixels")
@@ -126,14 +126,14 @@ final class WebPCompressionTests: XCTestCase {
         XCTAssertTrue(try chunkNames(source).contains("EXIF"), "precondition: the source carries EXIF")
 
         let kept = await compressor.compress(files: [source], options: CompressionOptions(preset: .balanced, maxDimension: 200), progress: { _, _ in })
-        guard case .compressed(_, let keptOutput, _, _)? = kept.first else { return XCTFail("\(kept)") }
+        guard case .compressed(_, let keptOutput, _, _, _)? = kept.first else { return XCTFail("\(kept)") }
         XCTAssertTrue(try chunkNames(keptOutput).contains("EXIF"), "kept by default")
         let size = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(try XCTUnwrap(CGImageSourceCreateWithURL(keptOutput as CFURL, nil)), 0, nil) as? [CFString: Any])
         XCTAssertEqual(size[kCGImagePropertyPixelWidth] as? Int, 200)
 
         try FileManager.default.removeItem(at: keptOutput)
         let stripped = await compressor.compress(files: [source], options: CompressionOptions(preset: .balanced, stripMetadata: true), progress: { _, _ in })
-        guard case .compressed(_, let strippedOutput, _, _)? = stripped.first else { return XCTFail("\(stripped)") }
+        guard case .compressed(_, let strippedOutput, _, _, _)? = stripped.first else { return XCTFail("\(stripped)") }
         XCTAssertFalse(try chunkNames(strippedOutput).contains("EXIF"), "stripped on request")
     }
 

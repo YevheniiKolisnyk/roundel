@@ -30,13 +30,16 @@ public struct ImageEncodingOptions: Equatable, Sendable {
     public var stripMetadata: Bool
     /// Spend more time for a smaller file (the encoder's slower, better settings).
     public var thorough: Bool
+    /// Carry the source's XMP packet over (JPEG and HEIC). Ignored when `stripMetadata` is set.
+    public var carryXMP: Bool
 
-    public init(quality: Double? = nil, lossless: Bool = false, maxDimension: Int? = nil, stripMetadata: Bool = false, thorough: Bool = false) {
+    public init(quality: Double? = nil, lossless: Bool = false, maxDimension: Int? = nil, stripMetadata: Bool = false, thorough: Bool = false, carryXMP: Bool = false) {
         self.quality = quality
         self.lossless = lossless
         self.maxDimension = maxDimension
         self.stripMetadata = stripMetadata
         self.thorough = thorough
+        self.carryXMP = carryXMP
     }
 }
 

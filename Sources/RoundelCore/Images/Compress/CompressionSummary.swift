@@ -1,7 +1,22 @@
 import Foundation
 
+/// What the compression took out besides bytes, so the user is told.
+public struct CompressionChanges: Equatable, Sendable {
+    public var metadataRemoved: Bool
+    /// HDR gain map, depth, mattes or Live Photo link that were dropped.
+    public var extrasRemoved: [AuxiliaryKind]
+    /// For a PNG: the palette size it was reduced to (a lossy step).
+    public var reducedToColors: Int?
+
+    public init(metadataRemoved: Bool = false, extrasRemoved: [AuxiliaryKind] = [], reducedToColors: Int? = nil) {
+        self.metadataRemoved = metadataRemoved
+        self.extrasRemoved = extrasRemoved
+        self.reducedToColors = reducedToColors
+    }
+}
+
 public enum CompressionItemResult: Equatable, Sendable {
-    case compressed(source: URL, output: URL, bytesBefore: Int, bytesAfter: Int)
+    case compressed(source: URL, output: URL, bytesBefore: Int, bytesAfter: Int, changes: CompressionChanges = CompressionChanges())
     /// Compressing would not have saved enough (or the file is already compressed as far as is sensible); nothing was written.
     case alreadyOptimal(source: URL)
     case skipped(source: URL, reason: CompressionSkipReason)
@@ -22,8 +37,8 @@ public struct CompressionSummary: Equatable, Sendable {
     public var failedCount: Int { results.filter { if case .failed = $0 { true } else { false } }.count }
 
     /// Sizes of the files that were compressed, before and after.
-    public var bytesBefore: Int { results.reduce(0) { if case .compressed(_, _, let before, _) = $1 { $0 + before } else { $0 } } }
-    public var bytesAfter: Int { results.reduce(0) { if case .compressed(_, _, _, let after) = $1 { $0 + after } else { $0 } } }
+    public var bytesBefore: Int { results.reduce(0) { if case .compressed(_, _, let before, _, _) = $1 { $0 + before } else { $0 } } }
+    public var bytesAfter: Int { results.reduce(0) { if case .compressed(_, _, _, let after, _) = $1 { $0 + after } else { $0 } } }
     public var savedPercent: Int { ByteSize.savedPercent(before: bytesBefore, after: bytesAfter) }
 
     /// Something failed but something else worked.
@@ -49,7 +64,7 @@ public struct CompressionSummary: Equatable, Sendable {
             }
         } else {
             let saved = "saved \(savedPercent)% (\(ByteSize.format(bytesBefore)) → \(ByteSize.format(bytesAfter)))"
-            if results.count == 1, case .compressed(let source, let output, _, _)? = results.first {
+            if results.count == 1, case .compressed(let source, let output, _, _, _)? = results.first {
                 parts.append("Compressed \(source.lastPathComponent) → \(output.lastPathComponent), \(saved)")
             } else if failedCount > 0 || skippedCount > 0 || alreadyOptimalCount > 0 {
                 let considered = compressedCount + failedCount + (failedCount > 0 ? 0 : 0)
@@ -58,6 +73,7 @@ public struct CompressionSummary: Equatable, Sendable {
             } else {
                 parts.append("Compressed \(compressedCount) files, \(saved)")
             }
+            parts.append(contentsOf: changeParts)
             if alreadyOptimalCount > 0 { parts.append("\(alreadyOptimalCount) already optimal") }
         }
         if compressedCount == 0, failedCount > 0, alreadyOptimalCount > 0 { parts.append("\(alreadyOptimalCount) already optimal") }
@@ -74,6 +90,18 @@ public struct CompressionSummary: Equatable, Sendable {
     }
 
     // MARK: Private
+
+    /// What was taken out, in a few words: "metadata removed", "HDR, depth or Live Photo data removed (2 files)", "colors reduced in 1 PNG".
+    private var changeParts: [String] {
+        let changes = results.compactMap { result -> CompressionChanges? in if case .compressed(_, _, _, _, let c) = result { c } else { nil } }
+        var parts: [String] = []
+        if changes.contains(where: \.metadataRemoved) { parts.append("metadata removed") }
+        let extras = changes.filter { !$0.extrasRemoved.isEmpty }.count
+        if extras > 0 { parts.append("HDR, depth or Live Photo data removed (\(extras) \(extras == 1 ? "file" : "files"))") }
+        let reduced = changes.filter { $0.reducedToColors != nil }.count
+        if reduced > 0 { parts.append("colors reduced in \(reduced) PNG\(reduced == 1 ? "" : "s")") }
+        return parts
+    }
 
     private var failedItems: [(name: String, message: String)] {
         results.compactMap { result in

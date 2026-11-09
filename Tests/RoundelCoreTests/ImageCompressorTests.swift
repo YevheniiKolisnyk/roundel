@@ -22,7 +22,7 @@ final class ImageCompressorTests: TempDirTestCase {
         let source = try cameraJPEG()
         let original = try Data(contentsOf: source)
         let results = await compress([source])
-        guard case .compressed(let src, let output, let before, let after)? = results.first else { return XCTFail("\(results)") }
+        guard case .compressed(let src, let output, let before, let after, _)? = results.first else { return XCTFail("\(results)") }
         XCTAssertEqual(src, source)
         XCTAssertEqual(output.lastPathComponent, "photo compressed.jpg")
         XCTAssertEqual(output.deletingLastPathComponent(), dir)
@@ -38,18 +38,18 @@ final class ImageCompressorTests: TempDirTestCase {
     func testTheDefaultKeepsLocationAndOrientationAndStripMetadataRemovesTheLocation() async throws {
         let gps: [CFString: Any] = [kCGImagePropertyGPSLatitude: 50.45, kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLongitude: 30.52, kCGImagePropertyGPSLongitudeRef: "E"]
         let source = try cameraJPEG(properties: [kCGImagePropertyGPSDictionary: gps, kCGImagePropertyOrientation: 6])
-        guard case .compressed(_, let kept, _, _)? = await compress([source]).first else { return XCTFail() }
+        guard case .compressed(_, let kept, _, _, _)? = await compress([source]).first else { return XCTFail() }
         XCTAssertNotNil(TestImages.properties(of: kept)[kCGImagePropertyGPSDictionary])
         XCTAssertEqual(TestImages.properties(of: kept)[kCGImagePropertyOrientation] as? Int, 6)
 
-        guard case .compressed(_, let stripped, _, _)? = await compress([source], CompressionOptions(stripMetadata: true)).first else { return XCTFail() }
+        guard case .compressed(_, let stripped, _, _, _)? = await compress([source], CompressionOptions(stripMetadata: true)).first else { return XCTFail() }
         XCTAssertNil(TestImages.properties(of: stripped)[kCGImagePropertyGPSDictionary])
         XCTAssertEqual(TestImages.properties(of: stripped)[kCGImagePropertyOrientation] as? Int, 6)
     }
 
     func testMaxDimensionShrinksThePicture() async throws {
         let source = try cameraJPEG()
-        guard case .compressed(_, let output, _, _)? = await compress([source], CompressionOptions(maxDimension: 320)).first else { return XCTFail() }
+        guard case .compressed(_, let output, _, _, _)? = await compress([source], CompressionOptions(maxDimension: 320)).first else { return XCTFail() }
         XCTAssertEqual(try TestImages.load(output).width, 320)
     }
 
@@ -57,7 +57,7 @@ final class ImageCompressorTests: TempDirTestCase {
         let source = try cameraJPEG()
         let earlier = dir.appendingPathComponent("photo compressed.jpg")
         try Data("do not touch".utf8).write(to: earlier)
-        guard case .compressed(_, let output, _, _)? = await compress([source]).first else { return XCTFail() }
+        guard case .compressed(_, let output, _, _, _)? = await compress([source]).first else { return XCTFail() }
         XCTAssertEqual(output.lastPathComponent, "photo compressed 2.jpg")
         XCTAssertEqual(try Data(contentsOf: earlier), Data("do not touch".utf8))
     }
@@ -72,7 +72,7 @@ final class ImageCompressorTests: TempDirTestCase {
     func testTheOutputExtensionFollowsTheContent() async throws {
         let png = dir.appendingPathComponent("really-a-png.jpg")
         try TestImages.write(TestImages.photo(width: 200, height: 150), as: "public.png", to: png)
-        guard case .compressed(_, let output, _, _)? = await compress([png]).first else { return XCTFail() }
+        guard case .compressed(_, let output, _, _, _)? = await compress([png]).first else { return XCTFail() }
         XCTAssertEqual(output.lastPathComponent, "really-a-png compressed.png")
     }
 
@@ -80,7 +80,7 @@ final class ImageCompressorTests: TempDirTestCase {
 
     func testAPNGIsOptimizedLosslesslyAndBecomesSmaller() async throws {
         let source = try TestImages.write(TestImages.photo(width: 300, height: 200, grain: 0), as: "public.png", to: dir.appendingPathComponent("shot.png"))
-        guard case .compressed(_, let output, let before, let after)? = await compress([source]).first else { return XCTFail() }
+        guard case .compressed(_, let output, let before, let after, _)? = await compress([source]).first else { return XCTFail() }
         XCTAssertEqual(output.lastPathComponent, "shot compressed.png")
         XCTAssertLessThan(after, before)
         XCTAssertEqual(TestImages.rgba(try TestImages.load(output)), TestImages.rgba(try TestImages.load(source)), "same pixels")
@@ -89,7 +89,7 @@ final class ImageCompressorTests: TempDirTestCase {
 
     func testAPNGThatIsAlreadyOptimalIsLeftAlone() async throws {
         let source = try TestImages.write(TestImages.photo(width: 120, height: 80), as: "public.png", to: dir.appendingPathComponent("a.png"))
-        guard case .compressed(_, let output, _, _)? = await compress([source]).first else { return XCTFail() }
+        guard case .compressed(_, let output, _, _, _)? = await compress([source]).first else { return XCTFail() }
         // Optimizing the optimized copy again gains nothing.
         let again = await compress([output])
         XCTAssertEqual(again, [.alreadyOptimal(source: output)])
@@ -180,7 +180,7 @@ final class ImageCompressorTests: TempDirTestCase {
             return await stub.compress(files: [source], options: CompressionOptions(), progress: { _, _ in })[0]
         }
         XCTAssertEqual(ImageCompressor.minimumSaving, 0.02)
-        if case .compressed(_, _, _, let after) = await attempt(98_000) { XCTAssertEqual(after, 98_000, "exactly 2% is enough") } else { XCTFail("98000 of 100000 saves 2%") }
+        if case .compressed(_, _, _, let after, _) = await attempt(98_000) { XCTAssertEqual(after, 98_000, "exactly 2% is enough") } else { XCTFail("98000 of 100000 saves 2%") }
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("s compressed.jpg"))
         let almost = await attempt(98_001), same = await attempt(100_000), bigger = await attempt(120_000)
         XCTAssertEqual(almost, .alreadyOptimal(source: source), "1.999% is not")
@@ -197,7 +197,7 @@ final class ImageCompressorTests: TempDirTestCase {
         let results = await compressor.compress(files: files, options: CompressionOptions(), progress: { done, total in steps.add(done, total) })
         XCTAssertEqual(steps.values.map(\.0), [1, 2, 3, 4, 5])
         XCTAssertTrue(steps.values.allSatisfy { $0.1 == 5 })
-        XCTAssertEqual(results.compactMap { result -> URL? in if case .compressed(let s, _, _, _) = result { return s } else { return nil } }, files)
+        XCTAssertEqual(results.compactMap { result -> URL? in if case .compressed(let s, _, _, _, _) = result { return s } else { return nil } }, files)
     }
 
     func testSmallFilesRunThreeAtATimeAndHugeOnesOneAtATime() async throws {

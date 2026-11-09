@@ -8,7 +8,7 @@ public struct ImageCompressAction: Action {
     public var acceptedInputs: Set<ActionInput> { [.files] }
     public var paramRules: ParamRules {
         ParamRules(specs: [.string("preset", allowed: CompressionPreset.allCases.map(\.rawValue)), .number("quality", range: 0...1),
-                           .int("maxDimension", range: 16...100_000), .bool("stripMetadata"), .bool("dropHDRData")])
+                           .int("maxDimension", range: 16...100_000), .bool("stripMetadata"), .bool("dropHDRData"), .bool("reducePNGColors")])
     }
 
     private let compressor: any ImageCompressing

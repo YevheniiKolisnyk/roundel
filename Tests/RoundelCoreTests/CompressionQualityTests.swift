@@ -12,7 +12,7 @@ final class CompressionQualityTests: TempDirTestCase {
 
     private func compressed(_ source: URL, _ preset: CompressionPreset) async throws -> (url: URL, bytes: Int) {
         let results = await compressor.compress(files: [source], options: CompressionOptions(preset: preset), progress: { _, _ in })
-        guard case .compressed(_, let output, _, let after)? = results.first else { XCTFail("\(preset): \(results)"); throw CancellationError() }
+        guard case .compressed(_, let output, _, let after, _)? = results.first else { XCTFail("\(preset): \(results)"); throw CancellationError() }
         return (output, after)
     }
 

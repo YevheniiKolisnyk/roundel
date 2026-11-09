@@ -53,7 +53,8 @@ public final class ImageCompressor: ImageCompressing, Sendable {
             return .failed(source: source, message: FailureText.cannotWriteHere)
         }
 
-        let decision = CompressionPlan.decide(probe.facts(of: source, detectedType: type), options: options)
+        let facts = probe.facts(of: source, detectedType: type)
+        let decision = CompressionPlan.decide(facts, options: options)
         switch decision {
         case .skip(let reason): return .skipped(source: source, reason: reason)
         case .alreadyOptimal: return .alreadyOptimal(source: source)
@@ -83,6 +84,7 @@ public final class ImageCompressor: ImageCompressing, Sendable {
             try? FileManager.default.removeItem(at: slot.temporary)
             return .failed(source: source, message: "the compressor produced no output")
         }
+        let changes = CompressionChanges(metadataRemoved: options.stripsMetadata, extrasRemoved: facts.auxiliaryData)   // a file with extras only gets here if they were allowed to go
         // Not worth keeping unless it saves enough.
         guard Double(after) <= Double(before) * (1 - Self.minimumSaving) else {
             try? FileManager.default.removeItem(at: slot.temporary)
@@ -90,7 +92,8 @@ public final class ImageCompressor: ImageCompressing, Sendable {
         }
 
         switch await placer.moveIntoPlace(slot, source: source, fileExtension: slot.target.pathExtension) {
-        case .success(let output): return .compressed(source: source, output: output, bytesBefore: before, bytesAfter: after)
+        case .success(let output):
+            return .compressed(source: source, output: output, bytesBefore: before, bytesAfter: after, changes: changes)
         case .failure(let failure): return .failed(source: source, message: failure.message)
         }
     }
@@ -103,7 +106,7 @@ public final class ImageCompressor: ImageCompressing, Sendable {
         switch decision {
         case .reencode(let format, let options):
             _ = try encoder.encode(source: source, to: temporary, format: format, options: options)
-        case .optimizePNG(let options):
+        case .optimizePNG(let options, _):
             let data = try Data(contentsOf: source)
             do {
                 try pngOptimizer(data, options).write(to: temporary)

@@ -148,7 +148,7 @@ final class ImageInspectorTests: TempDirTestCase {
     func testWithTheFlagItIsCompressedAndTheExtrasAreGone() async throws {
         let url = try depthJPEG()
         let results = await ImageCompressor(encoder: ImageIOEncoder()).compress(files: [url], options: CompressionOptions(preset: .strong, dropHDRData: true), progress: { _, _ in })
-        guard case .compressed(_, let output, let before, let after)? = results.first else { return XCTFail("\(results)") }
+        guard case .compressed(_, let output, let before, let after, _)? = results.first else { return XCTFail("\(results)") }
         XCTAssertLessThan(after, before)
         let inspection = ImageInspector.inspect(output)
         XCTAssertEqual(inspection.treatedAsExtraData, [], "the depth map did not survive, as promised")

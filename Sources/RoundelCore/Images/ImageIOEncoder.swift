@@ -47,7 +47,11 @@ public struct ImageIOEncoder: ImageBackend {
         guard let sink = CGImageDestinationCreateWithURL(destination as CFURL, format.typeIdentifier as CFString, 1, nil) else {
             throw ImageConversionError.encodeFailed(format: format.displayName)
         }
-        CGImageDestinationAddImage(sink, image, settings as CFDictionary)
+        if options.carryXMP, !options.stripMetadata, ImageIOEncoder.xmpFormats.contains(format.key), let xmp = Self.xmpOnly(from: url) {
+            CGImageDestinationAddImageAndMetadata(sink, image, xmp, settings as CFDictionary)
+        } else {
+            CGImageDestinationAddImage(sink, image, settings as CFDictionary)
+        }
         guard CGImageDestinationFinalize(sink) else { throw ImageConversionError.encodeFailed(format: format.displayName) }
         if format.key == "png", let pngOptimizer { Self.replaceIfSmaller(destination, using: pngOptimizer) }
 
@@ -55,6 +59,25 @@ public struct ImageIOEncoder: ImageBackend {
     }
 
     // MARK: Helpers
+
+    /// Formats whose XMP packet ImageIO writes from `CGImageMetadata`.
+    private static let xmpFormats: Set<String> = ["jpeg", "heic"]
+
+    /// The source's XMP properties (Dublin Core, xmp, photoshop, Iptc4xmp, ...), without the EXIF/TIFF/GPS ones, which travel
+    /// in the property dictionaries. `nil` when there is none. Apple's MakerNote is not available through ImageIO and is lost.
+    static func xmpOnly(from url: URL) -> CGImageMetadata? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let metadata = CGImageSourceCopyMetadataAtIndex(source, CGImageSourceGetPrimaryImageIndex(source), nil) else { return nil }
+        let out = CGImageMetadataCreateMutable()
+        let handledElsewhere: Set<String> = ["exif", "exifEX", "tiff", "aux", "GPS"]
+        var found = false
+        CGImageMetadataEnumerateTagsUsingBlock(metadata, nil, [kCGImageMetadataEnumerateRecursively: false] as CFDictionary) { path, tag in
+            let prefix = CGImageMetadataTagCopyPrefix(tag) as String? ?? ""
+            if !handledElsewhere.contains(prefix), CGImageMetadataSetTagWithPath(out, nil, path, tag) { found = true }
+            return true
+        }
+        return found ? out : nil
+    }
 
     /// Runs `optimizer` on the file at `url` and swaps in the result when it is smaller. Any failure leaves the file alone.
     private static func replaceIfSmaller(_ url: URL, using optimizer: @Sendable (Data) throws -> Data) {

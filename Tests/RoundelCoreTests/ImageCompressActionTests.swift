@@ -32,6 +32,8 @@ final class ImageCompressActionTests: XCTestCase {
         XCTAssertTrue(issues(["maxDimension": .number(1.5)]).contains { $0.blocksRun })
         XCTAssertTrue(issues(["stripMetadata": .string("yes")]).contains { $0.blocksRun })
         XCTAssertTrue(issues(["dropHDRData": .bool(true)]).isEmpty)
+        XCTAssertTrue(issues(["reducePNGColors": .bool(false)]).isEmpty)
+        XCTAssertTrue(issues(["reducePNGColors": .string("no")]).contains { $0.blocksRun })
         XCTAssertTrue(issues(["dropHDRData": .string("yes")]).contains { $0.blocksRun })
     }
 
@@ -98,7 +100,7 @@ final class ImageCompressActionTests: XCTestCase {
     // MARK: The group of presets
 
     func testThePresetsAreGeneratedAsThreeActionsWithSymbolsAndTheirPresetParam() {
-        let group = GroupNode(id: "files.compress", title: "Compress", children: [], generate: "image.compress.presets", params: .object(["maxDimension": .number(2000), "stripMetadata": .bool(true), "dropHDRData": .bool(true), "quality": .number(0.1)]))
+        let group = GroupNode(id: "files.compress", title: "Compress", children: [], generate: "image.compress.presets", params: .object(["maxDimension": .number(2000), "stripMetadata": .bool(true), "dropHDRData": .bool(true), "reducePNGColors": .bool(false), "quality": .number(0.1)]))
         let nodes = ImageCompressPresetsGenerator().children(for: group)
         XCTAssertEqual(nodes.map(\.id), ["files.compress.light", "files.compress.balanced", "files.compress.strong"])
         XCTAssertEqual(nodes.map(\.title), ["Light", "Balanced", "Strong"])
@@ -109,9 +111,11 @@ final class ImageCompressActionTests: XCTestCase {
             XCTAssertEqual(Params(a.params).int("maxDimension"), 2000)
             XCTAssertEqual(Params(a.params).bool("stripMetadata"), true)
             XCTAssertEqual(Params(a.params).bool("dropHDRData"), true)
+            XCTAssertEqual(Params(a.params).bool("reducePNGColors"), false)
             XCTAssertNil(Params(a.params).double("quality"), "a quality on the group would make the three presets identical")
             guard case .symbol(let name)? = a.icon else { return XCTFail("a symbol: the title is too long for a cell and is shown in the middle") }
             XCTAssertTrue(name.hasPrefix("gauge.with.dots.needle."))
+            if preset == .strong { XCTAssertEqual(name, "gauge.with.dots.needle.100percent", "the maximum") }
         }
         XCTAssertEqual(Set(nodes.compactMap { node -> String? in if case .action(let a) = node, case .symbol(let s)? = a.icon { s } else { nil } }).count, 3, "three different symbols")
     }
@@ -139,7 +143,10 @@ final class ImageCompressActionTests: XCTestCase {
         XCTAssertEqual(files.children.prefix(2).map(\.id), ["files.convert", "files.compress"])
         guard case .group(let compress) = files.children[1] else { return XCTFail() }
         XCTAssertEqual(compress.generate, "image.compress.presets")
-        for needle in ["image.compress", "stripMetadata", "dropHDRData", "gain map", "set dropHDRData to compress anyway", "maxDimension", "already optimal", "Strong is the same as Balanced for PNG", "GPS", "orientation", "at least 2%", "compressed"] {
+        XCTAssertNil(Params(compress.params).bool("stripMetadata"), "an explicit false here would stop Strong from stripping")
+        XCTAssertNil(Params(compress.params).bool("dropHDRData"))
+        XCTAssertNil(Params(compress.params).bool("reducePNGColors"))
+        for needle in ["image.compress", "stripMetadata", "dropHDRData", "reducePNGColors", "gain map", "set dropHDRData to compress anyway", "maxDimension", "already optimal", "XMP", "MakerNote", "metadata removed", "wins over the preset", "GPS", "orientation", "at least 2%", "compressed"] {
             XCTAssertTrue(DefaultConfig.exampleJSON.contains(needle), "the example config explains: \(needle)")
         }
     }

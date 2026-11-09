@@ -74,7 +74,8 @@ public enum CompressionSkipReason: Equatable, Sendable {
 public enum CompressionDecision: Equatable, Sendable {
     /// Encode again in the same format with these options.
     case reencode(format: ImageFormat, options: ImageEncodingOptions)
-    case optimizePNG(PNGOptimizer.Options)
+    /// `reduceColors`: a lossy palette may be tried after the lossless optimization (Strong).
+    case optimizePNG(PNGOptimizer.Options, reduceColors: Bool)
     case skip(CompressionSkipReason)
     /// Nothing worth doing: the file is already compressed as far as is sensible.
     case alreadyOptimal
@@ -87,10 +88,10 @@ public enum CompressionPlan {
 
         switch facts.detectedType {
         case "public.png":
-            return .optimizePNG(PNGOptimizer.Options(effort: options.preset.pngEffort, stripMetadata: options.stripMetadata))
+            return .optimizePNG(PNGOptimizer.Options(effort: options.preset.pngEffort, stripMetadata: options.stripsMetadata), reduceColors: options.reducesPNGColors)
 
         case "public.jpeg":
-            if facts.hasAuxiliaryData, !options.dropHDRData { return .skip(.hasAuxiliaryData(facts.auxiliaryData)) }
+            if facts.hasAuxiliaryData, !options.dropsHDRData { return .skip(.hasAuxiliaryData(facts.auxiliaryData)) }
             var quality = options.quality ?? options.preset.jpegQuality
             if options.quality == nil, let source = facts.jpegQualityIJG {
                 if let cap = JPEGQuality.cap(forSourceIJG: source) {
@@ -104,7 +105,7 @@ public enum CompressionPlan {
             return reencode("jpeg", options, quality: quality)
 
         case "public.heic":
-            if facts.hasAuxiliaryData, !options.dropHDRData { return .skip(.hasAuxiliaryData(facts.auxiliaryData)) }
+            if facts.hasAuxiliaryData, !options.dropsHDRData { return .skip(.hasAuxiliaryData(facts.auxiliaryData)) }
             return reencode("heic", options, quality: options.quality ?? options.preset.heicQuality)
 
         case "org.webmproject.webp":
@@ -129,7 +130,7 @@ public enum CompressionPlan {
     private static func reencode(_ key: String, _ options: CompressionOptions, quality: Double, lossless: Bool = false) -> CompressionDecision {
         guard let format = ImageFormats.format(forKey: key) else { return .skip(.unsupported(key)) }
         return .reencode(format: format, options: ImageEncodingOptions(quality: quality, lossless: lossless, maxDimension: options.maxDimension,
-                                                                         stripMetadata: options.stripMetadata, thorough: true))
+                                                                         stripMetadata: options.stripsMetadata, thorough: true, carryXMP: !options.stripsMetadata))
     }
 
     /// The file extension of the output: the source's own if it is right for the content, else the content's usual one.

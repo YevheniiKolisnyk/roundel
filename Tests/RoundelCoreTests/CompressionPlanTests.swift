@@ -7,16 +7,18 @@ final class CompressionPlanTests: XCTestCase {
         ImageFacts(detectedType: type, isAnimated: animated, auxiliaryData: aux, jpegQualityIJG: ijg, webpIsLossless: webpLossless)
     }
     private func decide(_ f: ImageFacts, _ o: CompressionOptions = CompressionOptions()) -> CompressionDecision { CompressionPlan.decide(f, options: o) }
-    private func options(_ preset: CompressionPreset, quality: Double? = nil, maxDimension: Int? = nil, strip: Bool = false, dropHDR: Bool = false) -> CompressionOptions {
-        CompressionOptions(preset: preset, quality: quality, maxDimension: maxDimension, stripMetadata: strip, dropHDRData: dropHDR)
+    private func options(_ preset: CompressionPreset, quality: Double? = nil, maxDimension: Int? = nil, strip: Bool? = nil, dropHDR: Bool? = nil, reduce: Bool? = nil) -> CompressionOptions {
+        CompressionOptions(preset: preset, quality: quality, maxDimension: maxDimension, stripMetadata: strip, dropHDRData: dropHDR, reducePNGColors: reduce)
     }
 
     // MARK: Presets
 
     func testThePresetNumbers() {
-        XCTAssertEqual(CompressionPreset.allCases.map(\.jpegQuality), [0.70, 0.55, 0.40])
-        XCTAssertEqual(CompressionPreset.allCases.map(\.heicQuality), [0.65, 0.55, 0.45])
-        XCTAssertEqual(CompressionPreset.allCases.map(\.webpQuality), [0.80, 0.70, 0.55])
+        // Strong's numbers are the fixed fallback (and the safe ceiling of its search): the quality that still held a similarity of 0.88
+        // on the most textured generated picture (JPEG 0.35, HEIC 0.25, WebP 60).
+        XCTAssertEqual(CompressionPreset.allCases.map(\.jpegQuality), [0.70, 0.55, 0.35])
+        XCTAssertEqual(CompressionPreset.allCases.map(\.heicQuality), [0.65, 0.55, 0.25])
+        XCTAssertEqual(CompressionPreset.allCases.map(\.webpQuality), [0.80, 0.70, 0.60])
         XCTAssertEqual(CompressionPreset.allCases.map(\.title), ["Light", "Balanced", "Strong"])
         XCTAssertEqual(CompressionPreset.allCases.map(\.rawValue), ["light", "balanced", "strong"])
     }
@@ -28,20 +30,19 @@ final class CompressionPlanTests: XCTestCase {
     }
 
     func testOptionsFromParams() {
-        XCTAssertEqual(CompressionOptions(params: Params(.object([:]))), CompressionOptions(preset: .balanced, quality: nil, maxDimension: nil, stripMetadata: false, dropHDRData: false), "balanced by default")
-        let full = Params(.object(["preset": .string("strong"), "quality": .number(0.3), "maxDimension": .number(2048), "stripMetadata": .bool(true), "dropHDRData": .bool(true)]))
-        XCTAssertEqual(CompressionOptions(params: full), CompressionOptions(preset: .strong, quality: 0.3, maxDimension: 2048, stripMetadata: true, dropHDRData: true))
+        XCTAssertEqual(CompressionOptions(params: Params(.object([:]))), CompressionOptions(preset: .balanced), "balanced by default, nothing decided by the user")
+        let full = Params(.object(["preset": .string("strong"), "quality": .number(0.3), "maxDimension": .number(2048), "stripMetadata": .bool(true), "dropHDRData": .bool(true), "reducePNGColors": .bool(false)]))
+        XCTAssertEqual(CompressionOptions(params: full), CompressionOptions(preset: .strong, quality: 0.3, maxDimension: 2048, stripMetadata: true, dropHDRData: true, reducePNGColors: false))
         XCTAssertEqual(CompressionOptions(params: Params(.object(["preset": .string("nonsense")]))).preset, .balanced)
     }
 
     // MARK: PNG
 
     func testPNGGoesToTheOptimizerWithEffortFromThePreset() {
-        XCTAssertEqual(decide(facts("public.png"), options(.light)), .optimizePNG(.init(effort: .light, stripMetadata: false)))
-        for preset in [CompressionPreset.balanced, .strong] {
-            XCTAssertEqual(decide(facts("public.png"), options(preset)), .optimizePNG(.init(effort: .thorough, stripMetadata: false)), "Strong is Balanced for PNG")
-        }
-        XCTAssertEqual(decide(facts("public.png"), options(.balanced, quality: 0.1, strip: true)), .optimizePNG(.init(effort: .thorough, stripMetadata: true)), "a quality never makes PNG lossy")
+        XCTAssertEqual(decide(facts("public.png"), options(.light)), .optimizePNG(.init(effort: .light, stripMetadata: false), reduceColors: false))
+        XCTAssertEqual(decide(facts("public.png"), options(.balanced)), .optimizePNG(.init(effort: .thorough, stripMetadata: false), reduceColors: false))
+        XCTAssertEqual(decide(facts("public.png"), options(.strong)), .optimizePNG(.init(effort: .thorough, stripMetadata: true), reduceColors: true), "Strong strips and may reduce colors")
+        XCTAssertEqual(decide(facts("public.png"), options(.balanced, quality: 0.1, strip: true)), .optimizePNG(.init(effort: .thorough, stripMetadata: true), reduceColors: false), "a quality never makes PNG lossy")
     }
 
     func testAnimatedPNGIsSkipped() {
@@ -65,7 +66,7 @@ final class CompressionPlanTests: XCTestCase {
         XCTAssertLessThanOrEqual(JPEGQuality.ijg(forImageIO: quality), 80 - 4 + 0.5, "four IJG points below the source")
         // A preset that is already lower than the cap is left alone.
         guard case .reencode(_, let strong) = decide(facts("public.jpeg", ijg: 96), options(.strong)) else { return XCTFail("re-encode") }
-        XCTAssertEqual(strong.quality, 0.40)
+        XCTAssertEqual(strong.quality, 0.35)
     }
 
     func testAJPEGThatIsAlreadyHeavilyCompressedIsAlreadyOptimal() {
@@ -126,10 +127,41 @@ final class CompressionPlanTests: XCTestCase {
         XCTAssertEqual(decide(facts("public.jpeg", aux: [.depth], ijg: 95), options(.balanced, dropHDR: false)), .skip(.hasAuxiliaryData([.depth])), "off by default")
     }
 
+    // MARK: What a preset implies, and what the user's own parameters override
+
+    func testEffectiveSettingsFollowThePresetUnlessTheUserSaidOtherwise() {
+        let cases: [(CompressionPreset, Bool, Bool, Bool)] = [(.light, false, false, false), (.balanced, false, false, false), (.strong, true, true, true)]
+        for (preset, strip, drop, reduce) in cases {
+            let o = CompressionOptions(preset: preset)
+            XCTAssertEqual([o.stripsMetadata, o.dropsHDRData, o.reducesPNGColors], [strip, drop, reduce], "\(preset)")
+        }
+        let overridden = CompressionOptions(preset: .strong, stripMetadata: false, dropHDRData: false, reducePNGColors: false)
+        XCTAssertEqual([overridden.stripsMetadata, overridden.dropsHDRData, overridden.reducesPNGColors], [false, false, false], "explicit parameters win over what Strong implies")
+        let forced = CompressionOptions(preset: .light, stripMetadata: true, dropHDRData: true, reducePNGColors: true)
+        XCTAssertEqual([forced.stripsMetadata, forced.dropsHDRData, forced.reducesPNGColors], [true, true, true], "and they can add to a gentler preset")
+    }
+
+    func testStrongReEncodesFilesWithExtrasAndStripsButLightSkipsThem() {
+        guard case .reencode(_, let strong) = decide(facts("public.jpeg", aux: [.hdrGainMap, .livePhoto], ijg: 95), options(.strong)) else { return XCTFail("Strong implies dropHDRData") }
+        XCTAssertTrue(strong.stripMetadata)
+        XCTAssertFalse(strong.carryXMP)
+        XCTAssertEqual(decide(facts("public.jpeg", aux: [.hdrGainMap], ijg: 95), options(.light)), .skip(.hasAuxiliaryData([.hdrGainMap])))
+        XCTAssertEqual(decide(facts("public.jpeg", aux: [.hdrGainMap], ijg: 95), options(.strong, dropHDR: false)), .skip(.hasAuxiliaryData([.hdrGainMap])), "an explicit false wins")
+    }
+
+    func testOnlyAPresetThatKeepsMetadataCarriesXMP() {
+        for preset in [CompressionPreset.light, .balanced] {
+            guard case .reencode(_, let o) = decide(facts("public.jpeg", ijg: 95), options(preset)) else { return XCTFail() }
+            XCTAssertFalse(o.stripMetadata); XCTAssertTrue(o.carryXMP, "\(preset)")
+        }
+        guard case .reencode(_, let o) = decide(facts("public.heic"), options(.balanced, strip: true)) else { return XCTFail() }
+        XCTAssertTrue(o.stripMetadata); XCTAssertFalse(o.carryXMP)
+    }
+
     func testDropHDRDataChangesNothingForFilesWithoutExtras() {
         let withFlag = decide(facts("public.jpeg", ijg: 95), options(.balanced, dropHDR: true))
         XCTAssertEqual(withFlag, decide(facts("public.jpeg", ijg: 95), options(.balanced)))
-        XCTAssertEqual(decide(facts("public.png", aux: [.depth]), options(.balanced)), .optimizePNG(.init(effort: .thorough, stripMetadata: false)), "PNG is never skipped for extras")
+        XCTAssertEqual(decide(facts("public.png", aux: [.depth]), options(.balanced)), .optimizePNG(.init(effort: .thorough, stripMetadata: false), reduceColors: false), "PNG is never skipped for extras")
     }
 
     // MARK: Everything else
